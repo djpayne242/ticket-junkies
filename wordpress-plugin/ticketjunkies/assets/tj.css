@@ -1053,6 +1053,17 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .tj-root .tier-row .tier-sale-field { grid-column: 1 / -1; }
 .tj-root .tier-row .tier-sale-field input { max-width: 320px; }
 
+/* ticket sales window (start/end date & time) */
+.tj-root .sale-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.tj-root .sale-grid label { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; font-weight: 700; color: var(--muted); margin: 0; }
+.tj-root .sale-grid input { width: 100%; }
+.tj-root .tier-row .tier-sale-field input { max-width: none; }
+@media (max-width: 760px) { .tj-root .sale-grid { grid-template-columns: 1fr 1fr; } }
+.tj-root .cd-chip.sale-end { margin-top: 6px; color: #b3261e; background: rgba(217, 48, 37, .1); }
+:root[data-theme="dark"] .tj-root .cd-chip.sale-end { color: #f28b82; background: rgba(217, 48, 37, .2); }
+.tj-root .cd-chip.sale-end.is-live { color: var(--muted); background: var(--chip, rgba(0,0,0,.06)); }
+.tj-root .tier.tier-closed { opacity: .6; }
+
 
 /* =========================================================
    WordPress / Elementor integration

@@ -65,8 +65,24 @@ function priceText(kind, min, many = true) {
   if (kind === 'free' || min === 0) return 'Free';
   return many ? `From ${money(min)}` : money(min);
 }
-const tierOnSaleNow = (t) => !t.salesStart || new Date(t.salesStart).getTime() <= Date.now();
-function nextSaleStart(ev) { return ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private' && !tierOnSaleNow(t)).map((t) => t.salesStart).sort()[0] || null; }
+// soon = sales not started · open = can be bought · closed = sales end has passed
+function tierSaleState(t) {
+  const now = Date.now();
+  if (t.salesStart && new Date(t.salesStart).getTime() > now) return 'soon';
+  if (t.salesEnd && new Date(t.salesEnd).getTime() <= now) return 'closed';
+  return 'open';
+}
+const tierOnSaleNow = (t) => tierSaleState(t) === 'open';
+function nextSaleStart(ev) { return ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private' && tierSaleState(t) === 'soon').map((t) => t.salesStart).sort()[0] || null; }
+function salesClosed(ev) { const a = ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private'); return a.length > 0 && a.every((t) => tierSaleState(t) === 'closed'); }
+// "Nov 25, 2:00 PM – Nov 30, 11:59 PM" for a ticket type's sales window
+function salesWindowText(t) {
+  const f = (iso) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  if (t.salesStart && t.salesEnd) return `Sales: ${f(t.salesStart)} – ${f(t.salesEnd)}`;
+  if (t.salesStart) return `Sales start ${f(t.salesStart)}`;
+  if (t.salesEnd) return `Sales end ${f(t.salesEnd)}`;
+  return '';
+}
 function lowestTier(ev) {
   const open = ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private' && tierOnSaleNow(t));
   if (!open.length) return null;
@@ -74,7 +90,7 @@ function lowestTier(ev) {
 }
 function priceFrom(ev) {
   const t = lowestTier(ev);
-  if (!t) return nextSaleStart(ev) ? '<span class="badge soon">On sale soon</span>' : '<span class="badge soldout">Sold out</span>';
+  if (!t) return nextSaleStart(ev) ? '<span class="badge soon">On sale soon</span>' : salesClosed(ev) ? '<span class="badge">Sales ended</span>' : '<span class="badge soldout">Sold out</span>';
   return esc(priceText(tierKindOf(t), t.price, ev.tiers.filter((x) => x.visibility !== 'private').length > 1));
 }
 
@@ -103,6 +119,12 @@ function tickCountdowns() {
     }
     const t = el.querySelector('.cd-txt') || el;
     const left = `${c.d ? c.d + 'd ' : ''}${p2(c.h)}h ${p2(c.m)}m ${p2(c.s)}s`;
+    if (el.dataset.cdKind === 'saleEnd') {
+      // ticket type countdown: until its sales end
+      t.textContent = state === 'soon' ? `Sales end in ${left}` : 'Sales ended';
+      if (state !== 'soon' && !el.dataset.cdFired) { el.dataset.cdFired = '1'; el.dispatchEvent(new CustomEvent('tj:onsale', { bubbles: true })); }
+      return;
+    }
     if (el.dataset.cdKind === 'sale') {
       // ticket type countdown: until its sales start
       t.textContent = state === 'soon' ? `On sale in ${left}` : 'On sale now';
@@ -500,7 +522,7 @@ function openCalendarDay(day, evs, hols, routeFix) {
     const img = e.imageUrl
       ? `<img src="${esc(e.imageUrl)}" alt="${esc(e.title)} flyer" loading="lazy" decoding="async" />`
       : `<div class="cal-pop-noimg" style="background:linear-gradient(135deg,${(CAT_STYLE[e.category] || ['#376eb8', '#84d65f'])[0]},${(CAT_STYLE[e.category] || ['#376eb8', '#84d65f'])[1]})"><span>${(CAT_STYLE[e.category] || [, , '🎟️'])[2]}</span></div>`;
-    const price = e.ended ? '<span class="badge">Ended</span>' : e.soldOut ? '<span class="badge soldout">Sold out</span>' : e.priceFrom === null && e.salesStart ? '<span class="badge soon">On sale soon</span>' : `<strong class="cal-pop-price">${esc(calMoney(e.priceFrom, e.priceKind))}</strong>`;
+    const price = e.ended ? '<span class="badge">Ended</span>' : e.soldOut ? '<span class="badge soldout">Sold out</span>' : e.priceFrom === null && e.salesStart ? '<span class="badge soon">On sale soon</span>' : e.salesClosed ? '<span class="badge">Sales ended</span>' : `<strong class="cal-pop-price">${esc(calMoney(e.priceFrom, e.priceKind))}</strong>`;
     return `<article class="cal-pop-ev${e.ended ? ' ended' : ''}">
       <a class="cal-pop-flyer" href="${link}">${img}</a>
       <div class="cal-pop-body">
@@ -682,12 +704,18 @@ async function pageEvent(id) {
           ${t.description ? `<div class="tier-desc">${esc(t.description)}</div>` : ''}
           <div class="muted small">Hidden from the public · ${t.remaining} left · <a href="#/attendees/${esc(ev.id)}">Send complimentary tickets</a></div></div>
       </div>`;
-      if (!tierOnSaleNow(t)) return `<div class="tier tier-soon">
+      if (tierSaleState(t) === 'soon') return `<div class="tier tier-soon">
         <div><div class="tier-name">${esc(t.name)}</div>
           ${t.description ? `<div class="tier-desc">${esc(t.description)}</div>` : ''}
           <div class="small">${tierKindOf(t) === 'donation' ? `<span class="kind-badge donation">💝 Donation</span> ${t.price > 0 ? 'Minimum ' + money(t.price) : 'Pay what you want'}` : tierKindOf(t) === 'free' || t.price === 0 ? '<span class="kind-badge free">🎁 Free</span>' : `<strong>${money(t.price)}</strong> <span class="muted">+ ${money(t.fee)} fee</span>`}</div>
-          <div class="muted small">On sale ${esc(fmtLong(t.salesStart))}</div></div>
+          <div class="muted small">On sale ${esc(fmtLong(t.salesStart))}${t.salesEnd ? ` · until ${esc(fmtLong(t.salesEnd))}` : ''}</div></div>
         <span class="cd-chip sale" data-cd-kind="sale" data-cd="${esc(t.salesStart)}" data-cd-end="${esc(ev.endsAt)}">🕒 <span class="cd-txt">…</span></span>
+      </div>`;
+      if (tierSaleState(t) === 'closed') return `<div class="tier tier-closed">
+        <div><div class="tier-name">${esc(t.name)}</div>
+          ${t.description ? `<div class="tier-desc">${esc(t.description)}</div>` : ''}
+          <div class="muted small">Sales ended ${esc(fmtLong(t.salesEnd))}</div></div>
+        <span class="badge">Sales ended</span>
       </div>`;
       const max = Math.min(10, t.remaining);
       const opts = Array.from({ length: max + 1 }, (_, i) => `<option ${i === qty[t.id] ? 'selected' : ''}>${i}</option>`).join('');
@@ -698,7 +726,8 @@ async function pageEvent(id) {
             ? `<span class="kind-badge donation">💝 Donation</span> <strong>${t.price > 0 ? 'Minimum ' + money(t.price) : 'Pay what you want'}</strong>${t.suggested ? ` <span class="muted">· suggested ${money(t.suggested)}</span>` : ''}`
             : tierKindOf(t) === 'free' || t.price === 0 ? '<span class="kind-badge free">🎁 Free</span>' : `<strong>${money(t.price)}</strong> <span class="muted">+ ${money(t.fee)} fee</span>`}</div>
           ${tierKindOf(t) === 'donation' && qty[t.id] > 0 ? `<label class="don-amt"><span>Your donation per ticket</span><span class="don-in">$<input type="number" inputmode="decimal" min="${t.price}" step="0.01" data-amt="${esc(t.id)}" value="${esc(amt[t.id])}" /></span></label>${amtOk(t) ? '' : `<div class="error small" style="margin:6px 0 0">Minimum is ${money(t.price)}</div>`}` : ''}
-          <div class="muted small">${t.remaining > 0 ? (t.remaining <= 20 ? `Only ${t.remaining} left!` : 'Available') : 'Sold out'}</div></div>
+          <div class="muted small">${t.remaining > 0 ? (t.remaining <= 20 ? `Only ${t.remaining} left!` : 'Available') : 'Sold out'}${salesWindowText(t) ? ' · ' + esc(salesWindowText(t)) : ''}</div>
+          ${t.salesEnd && t.remaining > 0 && buyable ? `<span class="cd-chip sale-end" data-cd-kind="saleEnd" data-cd="${esc(t.salesEnd)}" data-cd-end="${esc(t.salesEnd)}">⌛ <span class="cd-txt">…</span></span>` : ''}</div>
         ${t.remaining > 0 && buyable ? `<select data-tier="${esc(t.id)}">${opts}</select>` : '<span class="badge soldout">Sold out</span>'}
       </div>`;
     }).join('');
@@ -1057,7 +1086,10 @@ async function pageEventForm(id) {
   const defEnd = new Date(def.getTime() + 4 * 3600000);
   const v = ev || { title: '', category: META.categories[0], description: '', startsAt: def.toISOString(), endsAt: defEnd.toISOString(), venue: '', address: '', city: '', imageUrl: '', status: 'published', tiers: [{ name: 'General Admission', price: 25, quantity: 100, sold: 0 }] };
   const isoToLocalInput = (iso) => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; const z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`; };
-  let tiers = v.tiers.map((t) => ({ ...t, kind: tierKindOf(t), suggested: t.suggested ?? '', salesStart: isoToLocalInput(t.salesStart) }));
+  const splitLocal = (iso) => { const v2 = isoToLocalInput(iso); return v2 ? v2.split('T') : ['', '']; };
+  let tiers = v.tiers.map((t) => { const [ssDate, ssTime] = splitLocal(t.salesStart), [seDate, seTime] = splitLocal(t.salesEnd); return { ...t, kind: tierKindOf(t), suggested: t.suggested ?? '', ssDate, ssTime, seDate, seTime }; });
+  // date + time boxes → ISO (start time defaults to 12:00 AM, end time to 11:59 PM)
+  const joinLocal = (d, tm, dflt) => (d ? new Date(`${d}T${tm || dflt}`).toISOString() : null);
   let imageUrl = v.imageUrl;
   let imageShareUrl = v.imageShareUrl || '';
   const dir = await api('/api/directory').catch(() => ({ organizers: [], venues: [] }));
@@ -1290,7 +1322,8 @@ async function pageEventForm(id) {
       tiers[i].kind = row.querySelector('[data-k=kind]').value;
       tiers[i].price = tiers[i].kind === 'free' ? 0 : row.querySelector('[data-k=price]').value;
       tiers[i].suggested = row.querySelector('[data-k=suggested]').value;
-      tiers[i].salesStart = row.querySelector('[data-k=salesStart]').value;
+      tiers[i].ssDate = row.querySelector('[data-k=ssDate]').value; tiers[i].ssTime = row.querySelector('[data-k=ssTime]').value;
+      tiers[i].seDate = row.querySelector('[data-k=seDate]').value; tiers[i].seTime = row.querySelector('[data-k=seTime]').value;
       tiers[i].quantity = row.querySelector('[data-k=quantity]').value;
       tiers[i].description = row.querySelector('[data-k=description]').value;
       tiers[i].visibility = row.querySelector('[data-k=visibility]').value;
@@ -1311,7 +1344,14 @@ async function pageEventForm(id) {
           <option value="public" ${t.visibility !== 'private' ? 'selected' : ''}>🌐 Public — on sale</option>
           <option value="private" ${t.visibility === 'private' ? 'selected' : ''}>🔒 Private — hidden</option></select></div>
         <button type="button" class="btn btn-danger btn-sm" data-rm="${i}" ${t.sold || tiers.length === 1 ? 'disabled' : ''}>✕</button>
-        <div class="field tier-sale-field"><label>Sales start <span class="muted small">(optional)</span></label><input data-k="salesStart" type="datetime-local" value="${esc(t.salesStart || '')}" /><span class="muted small">Leave empty to sell right away. Buyers see a countdown until then.</span></div>
+        <div class="field tier-sale-field"><label>Ticket sales window <span class="muted small">(optional)</span></label>
+          <div class="sale-grid">
+            <label><span>Sales start date</span><input data-k="ssDate" type="date" value="${esc(t.ssDate || '')}" /></label>
+            <label><span>Sales start time</span><input data-k="ssTime" type="time" value="${esc(t.ssTime || '')}" /></label>
+            <label><span>Sales end date</span><input data-k="seDate" type="date" value="${esc(t.seDate || '')}" /></label>
+            <label><span>Sales end time</span><input data-k="seTime" type="time" value="${esc(t.seTime || '')}" /></label>
+          </div>
+          <span class="muted small">Leave empty to sell from now until the event ends. Buyers see "On sale in…" before the start and "Sales end in…" while it's selling.</span></div>
         <div class="field tier-desc-field"><label>Description <span class="muted small">(optional)</span></label><input data-k="description" maxlength="300" value="${esc(t.description || '')}" placeholder="e.g. Includes 1 free drink and fast-track entry" /></div>
       </div>`).join('');
     document.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => { syncTiers(); tiers.splice(Number(b.dataset.rm), 1); renderTiers(); }));
@@ -1327,7 +1367,7 @@ async function pageEventForm(id) {
   document.getElementById('addTier').onclick = () => {
     syncTiers();
     if (tiers.length >= 10) return toast('Maximum 10 ticket types', true);
-    tiers.push({ name: '', kind: 'paid', price: '', suggested: '', salesStart: '', quantity: 50, sold: 0, description: '', visibility: 'public' }); renderTiers();
+    tiers.push({ name: '', kind: 'paid', price: '', suggested: '', ssDate: '', ssTime: '', seDate: '', seTime: '', quantity: 50, sold: 0, description: '', visibility: 'public' }); renderTiers();
   };
 
   // ---- schedule: times a day × days (create only) ----
@@ -1439,6 +1479,7 @@ async function pageEventForm(id) {
 
   document.getElementById('evForm').onsubmit = async (e) => {
     e.preventDefault(); syncTiers(); readXv();
+    { const bad = tiers.find((t) => (t.ssTime && !t.ssDate) || (t.seTime && !t.seDate)); if (bad) { toast(`"${bad.name || 'Ticket'}": pick a date for the sales ${bad.ssTime && !bad.ssDate ? 'start' : 'end'} time`, true); return; } }
     const pending = document.getElementById('orgInput').value.trim(); if (pending) addOrg();
     if (!orgs.length) { document.getElementById('orgInput').focus(); return showErr('evErr', 'Add at least one organizer'); }
     const xvClean = extraVenues.filter((x) => x.name || x.address || x.city);
@@ -1460,7 +1501,7 @@ async function pageEventForm(id) {
       ...f, ...extra, imageUrl, imageShareUrl, lat: geo.lat, lng: geo.lng, geoPrecision: geo.geoPrecision,
       startsAt: new Date(f.startsAt).toISOString(), endsAt: new Date(f.endsAt).toISOString(),
       tiers: tiers.map((t) => ({ id: t.id, name: t.name, kind: t.kind || 'paid', price: t.kind === 'free' ? 0 : Number(t.price), suggested: t.kind === 'donation' && t.suggested !== '' && t.suggested !== null && t.suggested !== undefined ? Number(t.suggested) : null,
-        salesStart: t.salesStart ? new Date(t.salesStart).toISOString() : null, quantity: Number(t.quantity), description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public' })),
+        salesStart: joinLocal(t.ssDate, t.ssTime, '00:00'), salesEnd: joinLocal(t.seDate, t.seTime, '23:59'), quantity: Number(t.quantity), description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public' })),
     };
     const btn = document.getElementById('saveBtn'); btn.disabled = true;
     try {
