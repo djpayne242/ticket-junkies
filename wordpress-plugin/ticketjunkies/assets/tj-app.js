@@ -490,49 +490,78 @@ function calendarHtml(o = {}) {
       <div class="cal-day"></div>
     </div></section>`;
 }
+function calMoney(n) { return n === null || n === undefined ? '' : n === 0 ? 'Free' : 'From $' + Number(n).toFixed(2); }
+function openCalendarDay(day, evs, hols, routeFix) {
+  document.getElementById('calModal')?.remove();
+  const label = new Date(day + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  const wrap = document.createElement('div');
+  wrap.id = 'calModal'; wrap.className = 'modal-backdrop tj-root';
+  const holHtml = hols.map((h) => `<div class="cal-pop-hol">🎉 <strong>${esc(h.name)}</strong>${h.note ? ` <span class="muted small">(${esc(h.note)})</span>` : ''} <span class="muted small">· Public holiday</span></div>`).join('');
+  const evHtml = evs.map((e) => {
+    const link = '#/event/' + encodeURIComponent(e.id);
+    const img = e.imageUrl
+      ? `<img src="${esc(e.imageUrl)}" alt="${esc(e.title)} flyer" loading="lazy" decoding="async" />`
+      : `<div class="cal-pop-noimg" style="background:linear-gradient(135deg,${(CAT_STYLE[e.category] || ['#376eb8', '#84d65f'])[0]},${(CAT_STYLE[e.category] || ['#376eb8', '#84d65f'])[1]})"><span>${(CAT_STYLE[e.category] || [, , '🎟️'])[2]}</span></div>`;
+    const price = e.ended ? '<span class="badge">Ended</span>' : e.soldOut ? '<span class="badge soldout">Sold out</span>' : `<strong class="cal-pop-price">${esc(calMoney(e.priceFrom))}</strong>`;
+    return `<article class="cal-pop-ev${e.ended ? ' ended' : ''}">
+      <a class="cal-pop-flyer" href="${link}">${img}</a>
+      <div class="cal-pop-body">
+        <div class="card-date">${esc(e.startDay === day ? e.time : 'Continues')} – ${esc(e.endTime)}${e.sessionLabel ? ' · ' + esc(e.sessionLabel) : ''}</div>
+        <h4><a href="${link}">${esc(e.title)}</a></h4>
+        <div class="muted small">📍 ${esc(e.city && !norm(e.venue).includes(norm(e.city)) ? e.venue + ', ' + e.city : e.venue)}</div>
+        <div class="muted small">🎤 ${esc(e.organizer || '')} · <span class="tag">${esc(e.category)}</span></div>
+        ${e.summary ? `<p class="cal-pop-desc">${esc(e.summary)}</p>` : ''}
+        <div class="cal-pop-foot">${price}<a class="btn btn-primary btn-sm" href="${link}">${e.ended ? 'View event' : e.soldOut ? 'View event' : 'Get tickets →'}</a></div>
+      </div></article>`;
+  }).join('');
+  wrap.innerHTML = `<div class="modal cal-pop" role="dialog" aria-modal="true" aria-label="${esc(label)}">
+    <div class="modal-head"><h3>📅 ${esc(label)}</h3><button class="modal-x" aria-label="Close">×</button></div>
+    ${holHtml}${evHtml || (hols.length ? '<p class="muted small" style="margin:10px 0 0">No events on this day yet.</p>' : '')}
+  </div>`;
+  tjFloat().appendChild(wrap);
+  const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (ev) => { if (ev.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  wrap.onclick = (ev) => { if (ev.target === wrap) close(); };
+  wrap.querySelector('.modal-x').onclick = close;
+  wrap.querySelectorAll('a[href^="#/"]').forEach((x) => x.addEventListener('click', () => setTimeout(close, 0)));
+  if (routeFix) routeFix(wrap);
+  wrap.querySelector('.modal-x').focus();
+}
 function mountCalendar(sec) {
   if (!sec) return;
   const grid = sec.querySelector('.cal-grid'), title = sec.querySelector('.cal-title'), dayEl = sec.querySelector('.cal-day'), countEl = sec.querySelector('.cal-count');
-  let data = null, sel = '';
+  let data = null;
   const ym = (m) => [Number(m.slice(0, 4)), Number(m.slice(5, 7))];
   const monthName = (m) => { const [y, mo] = ym(m); return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }); };
   const shift = (m, n) => { const [y, mo] = ym(m); return new Date(Date.UTC(y, mo - 1 + n, 1)).toISOString().slice(0, 7); };
   const byDay = () => { const map = {}; for (const e of data.events) for (const d of e.days) (map[d] ||= []).push(e); return map; };
-  const showDay = (map) => {
-    const list = sel ? map[sel] || [] : [];
-    if (!list.length) { dayEl.innerHTML = `<p class="muted small cal-hint">${data.events.length ? 'Tap a highlighted date to see its events.' : 'No events this month yet.'}</p>`; return; }
-    const label = new Date(sel + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
-    dayEl.innerHTML = `<h4>${esc(label)}</h4>` + list.map((e) => `<a class="cal-item${e.ended ? ' ended' : ''}" href="#/event/${encodeURIComponent(e.id)}">
-      <span class="cal-time">${esc(e.startDay === sel ? e.time : 'Continues')}</span>
-      <span class="cal-info"><span class="t">${esc(e.title)}</span>${e.sessionLabel ? ` <span class="tag">${esc(e.sessionLabel)}</span>` : ''}<span class="v">📍 ${esc(e.venue)}${e.ended ? ' · Ended' : ''}</span></span>
-      <span class="cal-go">View →</span></a>`).join('');
-    if (typeof tjFixLinks === 'function') tjFixLinks(dayEl);
-  };
+  const holDay = () => { const map = {}; for (const h of data.holidays || []) (map[h.date] ||= []).push(h); return map; };
+  const fix = (root) => { if (typeof tjFixLinks === 'function') tjFixLinks(root); };
   const render = () => {
-    const map = byDay(); const [y, mo] = ym(data.month);
+    const map = byDay(), hmap = holDay(); const [y, mo] = ym(data.month);
     const first = new Date(Date.UTC(y, mo - 1, 1)).getUTCDay(), n = new Date(Date.UTC(y, mo, 0)).getUTCDate();
     title.textContent = monthName(data.month);
     const cells = CAL_WD.map((w) => `<div class="cal-wd">${w}</div>`);
     for (let i = 0; i < first; i++) cells.push('<div class="cal-cell blank" aria-hidden="true"></div>');
     for (let d = 1; d <= n; d++) {
-      const key = `${data.month}-${String(d).padStart(2, '0')}`, evs = map[key] || [];
-      const cls = ['cal-cell', evs.length ? 'has-ev' : '', key === data.today ? 'today' : '', key < data.today ? 'past' : '', key === sel ? 'sel' : ''].filter(Boolean).join(' ');
-      const inner = `<span class="cal-num">${d}</span>${evs.slice(0, 2).map((e) => `<span class="cal-ev">${esc(e.title)}</span>`).join('')}${evs.length > 2 ? `<span class="cal-more">+${evs.length - 2} more</span>` : ''}${evs.length ? `<span class="cal-dots">${evs.slice(0, 3).map(() => '<i></i>').join('')}</span>` : ''}`;
-      cells.push(evs.length ? `<button type="button" class="${cls}" data-day="${key}" aria-label="${esc(d + ' ' + monthName(data.month) + ': ' + evs.map((e) => e.title).join(', '))}">${inner}</button>` : `<div class="${cls}">${inner}</div>`);
+      const key = `${data.month}-${String(d).padStart(2, '0')}`, evs = map[key] || [], hols = hmap[key] || [];
+      const cls = ['cal-cell', evs.length ? 'has-ev' : '', hols.length ? 'has-hol' : '', key === data.today ? 'today' : '', key < data.today ? 'past' : ''].filter(Boolean).join(' ');
+      const inner = `<span class="cal-num">${d}</span>${hols.slice(0, 1).map((h) => `<span class="cal-hol" title="${esc(h.name)}">🎉 ${esc(h.name)}</span>`).join('')}${evs.slice(0, hols.length ? 1 : 2).map((e) => `<span class="cal-ev">${esc(e.title)}</span>`).join('')}${evs.length > (hols.length ? 1 : 2) ? `<span class="cal-more">+${evs.length - (hols.length ? 1 : 2)} more</span>` : ''}${evs.length || hols.length ? `<span class="cal-dots">${hols.length ? '<i class="h"></i>' : ''}${evs.slice(0, 3).map(() => '<i></i>').join('')}</span>` : ''}`;
+      const aria = [...hols.map((h) => h.name + ' (public holiday)'), ...evs.map((e) => e.title)].join(', ');
+      cells.push(evs.length || hols.length ? `<button type="button" class="${cls}" data-day="${key}" aria-label="${esc(d + ' ' + monthName(data.month) + ': ' + aria)}">${inner}</button>` : `<div class="${cls}">${inner}</div>`);
     }
     grid.innerHTML = cells.join('');
-    const c = data.events.length;
-    countEl.textContent = c ? `${c} event${c === 1 ? '' : 's'} in ${monthName(data.month)}` : 'No events this month';
-    grid.querySelectorAll('button[data-day]').forEach((b) => { b.onclick = () => { sel = b.dataset.day; render(); }; });
-    showDay(map);
+    const c = data.events.length, hc = (data.holidays || []).length;
+    countEl.textContent = (c ? `${c} event${c === 1 ? '' : 's'}` : 'No events') + ` in ${monthName(data.month)}` + (hc ? ` · ${hc} public holiday${hc === 1 ? '' : 's'}` : '');
+    grid.querySelectorAll('button[data-day]').forEach((b) => { b.onclick = () => openCalendarDay(b.dataset.day, map[b.dataset.day] || [], hmap[b.dataset.day] || [], fix); });
+    dayEl.innerHTML = `<div class="cal-legend"><span><i class="lg-ev"></i>Event day — tap to see the flyer & details</span>${hc || data.holidayCountry ? `<span><i class="lg-hol"></i>Public holiday${data.holidayCountry ? ' in ' + esc(data.holidayCountry) : ''}</span>` : ''}<span><i class="lg-today"></i>Today</span></div>`;
   };
   const load = async (m) => {
     grid.style.opacity = '.5';
     try { data = await api('/api/calendar' + (m ? '?month=' + m : '')); }
     catch (e) { grid.style.opacity = ''; grid.innerHTML = `<div class="error" style="grid-column:1/-1">${esc(e.message)}</div>`; return; }
     grid.style.opacity = '';
-    const days = Object.keys(byDay()).sort();
-    sel = days.includes(data.today) ? data.today : (days.find((d) => d >= data.today) || '');
     render();
   };
   sec.querySelectorAll('.cal-nav').forEach((b) => { b.onclick = () => data && load(shift(data.month, Number(b.dataset.step))); });

@@ -90,3 +90,73 @@ export async function forecast(lat, lng) {
   if (wxMem.size > 500) wxMem.delete(wxMem.keys().next().value);
   return data;
 }
+
+// ---------- public holidays for the site's country ----------
+// The Bahamas are calculated here from the Public Holidays Act rules (the free online
+// databases list wrong Bahamian dates). Other countries come from date.nager.at.
+function easterSunday(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  return new Date(Date.UTC(y, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1));
+}
+const isoDay = (d) => d.toISOString().slice(0, 10);
+const addDays = (d, n) => new Date(d.getTime() + n * 86400000);
+const nthWeekday = (y, month, weekday, n) => { const first = new Date(Date.UTC(y, month, 1)); return addDays(first, ((weekday - first.getUTCDay() + 7) % 7) + (n - 1) * 7); };
+export function bahamasHolidays(y) {
+  const out = [];
+  const add = (d, name, note = '') => out.push({ date: isoDay(d), name, note });
+  // fixed-date holidays: when they fall on a Sunday the Monday after is the day off
+  const fixed = (month, day, name) => {
+    const d = new Date(Date.UTC(y, month, day));
+    add(d, name);
+    if (d.getUTCDay() === 0) add(addDays(d, 1), name, 'observed');
+  };
+  fixed(0, 1, "New Year's Day");
+  fixed(0, 10, 'Majority Rule Day');
+  const easter = easterSunday(y);
+  add(addDays(easter, -2), 'Good Friday');
+  add(addDays(easter, 1), 'Easter Monday');
+  add(addDays(easter, 50), 'Whit Monday');
+  add(nthWeekday(y, 5, 5, 1), 'Randol Fawkes Labour Day');
+  fixed(6, 10, 'Independence Day');
+  add(nthWeekday(y, 7, 1, 1), 'Emancipation Day');
+  add(nthWeekday(y, 9, 1, 2), "National Heroes' Day");
+  const xmas = new Date(Date.UTC(y, 11, 25));
+  add(xmas, 'Christmas Day');
+  add(new Date(Date.UTC(y, 11, 26)), 'Boxing Day');
+  if (xmas.getUTCDay() === 6) add(new Date(Date.UTC(y, 11, 27)), 'Boxing Day', 'observed'); // Boxing Day on a Sunday
+  if (xmas.getUTCDay() === 0) add(new Date(Date.UTC(y, 11, 27)), 'Christmas Day', 'observed');
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+const holidayCache = new Map();
+let nagerCountries = null;
+async function countryCode(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n || n === 'bahamas' || n === 'the bahamas' || n === 'bs') return 'BS';
+  if (/^[a-z]{2}$/.test(n)) return n.toUpperCase();
+  if (!nagerCountries) {
+    try { const r = await fetch('https://date.nager.at/api/v3/AvailableCountries', { signal: AbortSignal.timeout(8000) }); nagerCountries = r.ok ? await r.json() : []; } catch { nagerCountries = []; }
+  }
+  const hit = nagerCountries.find((c) => c.name.toLowerCase() === n || c.name.toLowerCase().replace(/^the /, '') === n.replace(/^the /, ''));
+  return hit ? hit.countryCode : '';
+}
+export async function publicHolidays(country, year) {
+  const code = await countryCode(country);
+  if (!code) return { country: country || '', holidays: [] };
+  if (code === 'BS') return { country: 'The Bahamas', holidays: bahamasHolidays(year) };
+  const key = code + year;
+  const c = holidayCache.get(key);
+  if (c && c.until > Date.now()) return c.value;
+  let value = { country: country || code, holidays: [] };
+  try {
+    const r = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/${code}`, { signal: AbortSignal.timeout(8000) });
+    if (r.ok) {
+      const seen = new Set();
+      value.holidays = (await r.json()).filter((x) => x.global !== false && (x.types || ['Public']).includes('Public'))
+        .filter((x) => { const k = x.date + x.name; if (seen.has(k)) return false; seen.add(k); return true; })
+        .map((x) => ({ date: x.date, name: x.name, note: '' }));
+    }
+  } catch { /* offline: no holidays */ }
+  holidayCache.set(key, { value, until: Date.now() + (value.holidays.length ? 7 * 86400000 : 3600000) });
+  return value;
+}

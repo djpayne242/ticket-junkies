@@ -734,7 +734,14 @@ class TJ_Rest {
   }
   /** Calendar of events: published events on the days they take place (site time zone).
    *  An overnight party that ends before 6 AM only counts on the day it starts. */
+  private static function short_text($s, $n = 170) {
+    $t = trim(preg_replace('/\s+/u', ' ', (string) $s));
+    if (function_exists('mb_strlen') ? mb_strlen($t) <= $n : strlen($t) <= $n) return $t;
+    $cut = function_exists('mb_substr') ? mb_substr($t, 0, $n) : substr($t, 0, $n);
+    return preg_replace('/\s+\S*$/u', '', $cut) . '…';
+  }
   public static function r_calendar($c) {
+    $viewer = self::current_user();
     $today = wp_date('Y-m-d');
     $month = (string) self::q($c, 'month');
     if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month)) $month = substr($today, 0, 7);
@@ -751,12 +758,22 @@ class TJ_Rest {
       $out[] = array(
         'id' => $e['id'], 'title' => $e['title'], 'startsAt' => $e['startsAt'], 'endsAt' => $e['endsAt'],
         'venue' => (string) self::g($e, 'venue'), 'category' => (string) self::g($e, 'category'), 'sessionLabel' => (string) self::g($e, 'sessionLabel'),
-        'time' => wp_date('g:i A', (int) floor(TJ_Store::ts_ms($e['startsAt']) / 1000)), 'startDay' => $start, 'days' => $days,
-        'ended' => TJ_Store::ts_ms($e['endsAt']) < $now,
+        'time' => wp_date('g:i A', (int) floor(TJ_Store::ts_ms($e['startsAt']) / 1000)), 'endTime' => wp_date('g:i A', (int) floor(TJ_Store::ts_ms($e['endsAt']) / 1000)),
+        'startDay' => $start, 'days' => $days, 'ended' => TJ_Store::ts_ms($e['endsAt']) < $now,
       );
+      $pe = self::public_event($e, $viewer);
+      $min = null;
+      foreach ($pe['tiers'] as $t) { if ($t['visibility'] === 'private' || $t['remaining'] <= 0) continue; $min = $min === null ? $t['price'] : min($min, $t['price']); }
+      $i = count($out) - 1;
+      $out[$i]['city'] = (string) self::g($e, 'city'); $out[$i]['imageUrl'] = (string) self::g($e, 'imageUrl');
+      $out[$i]['summary'] = self::short_text(self::g($e, 'description')); $out[$i]['organizer'] = $pe['organizer'];
+      $out[$i]['priceFrom'] = $min; $out[$i]['soldOut'] = $min === null;
     }
     usort($out, function ($a, $b) { return TJ_Store::ts_ms($a['startsAt']) <=> TJ_Store::ts_ms($b['startsAt']); });
-    return array('month' => $month, 'today' => $today, 'events' => $out);
+    $s = self::settings();
+    $hol = TJ_Geo::public_holidays(isset($s['maps']['country']) ? $s['maps']['country'] : 'Bahamas', (int) substr($month, 0, 4));
+    $hols = array(); foreach ($hol['holidays'] as $h) if (strpos($h['date'], $month) === 0) $hols[] = $h;
+    return array('month' => $month, 'today' => $today, 'events' => $out, 'holidayCountry' => $hol['country'], 'holidays' => $hols);
   }
 
   /** Choices for the search dropdowns, from events people can buy tickets for right now. */

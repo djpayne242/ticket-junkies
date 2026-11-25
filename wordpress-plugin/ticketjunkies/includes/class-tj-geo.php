@@ -111,4 +111,79 @@ class TJ_Geo {
     set_transient($key, $data, self::WX_TTL);
     return $data;
   }
+
+  // ---------- public holidays for the site's country ----------
+  // The Bahamas are calculated from the Public Holidays Act rules (online databases list wrong
+  // Bahamian dates). Other countries come from date.nager.at and are cached for a week.
+  private static function d($y, $m, $d) { return new DateTime(sprintf('%04d-%02d-%02d', $y, $m, $d), new DateTimeZone('UTC')); }
+  private static function nth_weekday($y, $m, $weekday, $n) {
+    $first = self::d($y, $m, 1); $off = ($weekday - (int) $first->format('w') + 7) % 7 + ($n - 1) * 7;
+    return $first->modify('+' . $off . ' days');
+  }
+  private static function easter($y) {
+    $a = $y % 19; $b = intdiv($y, 100); $c = $y % 100; $d = intdiv($b, 4); $e = $b % 4; $f = intdiv($b + 8, 25); $g = intdiv($b - $f + 1, 3);
+    $h = (19 * $a + $b - $d - $g + 15) % 30; $i = intdiv($c, 4); $k = $c % 4; $l = (32 + 2 * $e + 2 * $i - $h - $k) % 7; $m = intdiv($a + 11 * $h + 22 * $l, 451);
+    return self::d($y, intdiv($h + $l - 7 * $m + 114, 31), (($h + $l - 7 * $m + 114) % 31) + 1);
+  }
+  public static function bahamas_holidays($y) {
+    $out = array();
+    $add = function ($dt, $name, $note = '') use (&$out) { $out[] = array('date' => $dt->format('Y-m-d'), 'name' => $name, 'note' => $note); };
+    $fixed = function ($m, $day, $name) use ($y, $add) {
+      $dt = self::d($y, $m, $day); $add($dt, $name);
+      if ((int) $dt->format('w') === 0) $add((clone $dt)->modify('+1 day'), $name, 'observed');
+    };
+    $fixed(1, 1, "New Year's Day");
+    $fixed(1, 10, 'Majority Rule Day');
+    $e = self::easter($y);
+    $add((clone $e)->modify('-2 days'), 'Good Friday');
+    $add((clone $e)->modify('+1 day'), 'Easter Monday');
+    $add((clone $e)->modify('+50 days'), 'Whit Monday');
+    $add(self::nth_weekday($y, 6, 5, 1), 'Randol Fawkes Labour Day');
+    $fixed(7, 10, 'Independence Day');
+    $add(self::nth_weekday($y, 8, 1, 1), 'Emancipation Day');
+    $add(self::nth_weekday($y, 10, 1, 2), "National Heroes' Day");
+    $x = self::d($y, 12, 25);
+    $add($x, 'Christmas Day');
+    $add(self::d($y, 12, 26), 'Boxing Day');
+    if ((int) $x->format('w') === 6) $add(self::d($y, 12, 27), 'Boxing Day', 'observed');
+    if ((int) $x->format('w') === 0) $add(self::d($y, 12, 27), 'Christmas Day', 'observed');
+    usort($out, function ($a, $b) { return strcmp($a['date'], $b['date']); });
+    return $out;
+  }
+  private static function country_code($name) {
+    $n = strtolower(trim((string) $name));
+    if ($n === '' || $n === 'bahamas' || $n === 'the bahamas' || $n === 'bs') return 'BS';
+    if (preg_match('/^[a-z]{2}$/', $n)) return strtoupper($n);
+    $list = get_transient('tj_nager_countries');
+    if (!is_array($list)) {
+      $r = wp_remote_get('https://date.nager.at/api/v3/AvailableCountries', array('timeout' => 8));
+      $list = !is_wp_error($r) && wp_remote_retrieve_response_code($r) === 200 ? json_decode(wp_remote_retrieve_body($r), true) : array();
+      if (!is_array($list)) $list = array();
+      set_transient('tj_nager_countries', $list, $list ? WEEK_IN_SECONDS : HOUR_IN_SECONDS);
+    }
+    $plain = preg_replace('/^the /', '', $n);
+    foreach ($list as $c) { $cn = strtolower($c['name']); if ($cn === $n || preg_replace('/^the /', '', $cn) === $plain) return $c['countryCode']; }
+    return '';
+  }
+  public static function public_holidays($country, $year) {
+    $code = self::country_code($country);
+    if (!$code) return array('country' => (string) $country, 'holidays' => array());
+    if ($code === 'BS') return array('country' => 'The Bahamas', 'holidays' => self::bahamas_holidays((int) $year));
+    $key = 'tj_hol_' . $code . '_' . (int) $year;
+    $c = get_transient($key);
+    if (is_array($c)) return $c;
+    $val = array('country' => $country ? $country : $code, 'holidays' => array());
+    $r = wp_remote_get('https://date.nager.at/api/v3/PublicHolidays/' . (int) $year . '/' . $code, array('timeout' => 8));
+    if (!is_wp_error($r) && wp_remote_retrieve_response_code($r) === 200) {
+      $seen = array();
+      foreach ((array) json_decode(wp_remote_retrieve_body($r), true) as $x) {
+        if (isset($x['global']) && $x['global'] === false) continue;
+        if (!empty($x['types']) && !in_array('Public', (array) $x['types'], true)) continue;
+        $k = $x['date'] . $x['name']; if (isset($seen[$k])) continue; $seen[$k] = 1;
+        $val['holidays'][] = array('date' => $x['date'], 'name' => $x['name'], 'note' => '');
+      }
+    }
+    set_transient($key, $val, $val['holidays'] ? WEEK_IN_SECONDS : HOUR_IN_SECONDS);
+    return $val;
+  }
 }

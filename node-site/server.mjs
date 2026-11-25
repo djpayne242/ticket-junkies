@@ -10,7 +10,7 @@ import os from 'node:os';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { qrPng, qrSvg, qrMatrix } from './qr.mjs';
-import { geocodePlace, forecast, validLatLng } from './geo.mjs';
+import { geocodePlace, forecast, validLatLng, publicHolidays } from './geo.mjs';
 import { toPdf, toDocx, toXlsx, toCsv, ticketsPdf } from './exporters.mjs';
 import { createNotifier, emailLayout, detailTable, escHtml as h, normalizePhone } from './notify.mjs';
 
@@ -808,7 +808,9 @@ function calendarDays(e) {
   for (let i = 0; i < 62; i++) { const k = d.toISOString().slice(0, 10); if (k > end) break; out.push(k); d.setUTCDate(d.getUTCDate() + 1); }
   return out;
 }
-route('GET', '/api/calendar', ({ query }) => {
+function shortText(s, n = 170) { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n).replace(/\s+\S*$/, '') + '…' : t; }
+route('GET', '/api/calendar', async ({ req, query }) => {
+  const viewer = currentUser(req);
   const today = siteParts(new Date()).date;
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.get('month') || '') ? query.get('month') : today.slice(0, 7);
   const now = Date.now();
@@ -818,11 +820,16 @@ route('GET', '/api/calendar', ({ query }) => {
     const all = calendarDays(e);
     const days = all.filter((k) => k.startsWith(month));
     if (!days.length) continue;
-    events.push({ id: e.id, title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, venue: e.venue || '', category: e.category, sessionLabel: e.sessionLabel || '',
-      time: siteTimeFmt.format(new Date(e.startsAt)), startDay: all[0], days, ended: new Date(e.endsAt).getTime() < now });
+    const pe = publicEvent(e, viewer);
+    const open = pe.tiers.filter((t) => t.visibility !== 'private' && t.remaining > 0);
+    events.push({ id: e.id, title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, venue: e.venue || '', city: e.city || '', category: e.category, sessionLabel: e.sessionLabel || '',
+      time: siteTimeFmt.format(new Date(e.startsAt)), endTime: siteTimeFmt.format(new Date(e.endsAt)), startDay: all[0], days, ended: new Date(e.endsAt).getTime() < now,
+      imageUrl: e.imageUrl || '', summary: shortText(e.description), organizer: pe.organizer,
+      priceFrom: open.length ? Math.min(...open.map((t) => t.price)) : null, soldOut: !open.length });
   }
   events.sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
-  return { month, today, events };
+  const hol = await publicHolidays(db.settings.maps?.country || 'Bahamas', Number(month.slice(0, 4)));
+  return { month, today, events, holidayCountry: hol.country, holidays: hol.holidays.filter((x) => x.date.startsWith(month)) };
 });
 
 route('GET', '/api/events', ({ req, query }) => {
