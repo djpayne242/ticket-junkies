@@ -1131,6 +1131,12 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 /* with the preloader on, never show "Loading…" words: the icon replaces them */
 html:has(#tjPre) .tj-root .loading { color: transparent; }
 
+/* ---------- admin menu: one slim line ---------- */
+.tj-root .admin-tabs { flex-wrap: nowrap; gap: 2px; padding: 4px; border-radius: 12px; margin-bottom: 18px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.tj-root .admin-tabs::-webkit-scrollbar { display: none; }
+.tj-root .admin-tabs a { flex: 1 0 auto; text-align: center; white-space: nowrap; padding: 6px 9px; border-radius: 8px; font-size: .84rem; line-height: 1.3; }
+@media (max-width: 1100px) { .tj-root .admin-tabs a { flex: none; padding: 6px 8px; font-size: .8rem; } }
+
 
 /* =========================================================
    WordPress / Elementor integration
