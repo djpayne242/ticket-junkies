@@ -239,6 +239,7 @@ function seriesDates(ev, viewer) {
 }
 function publicEvent(ev, viewer) {
   const organizer = db.users.find((u) => u.id === ev.organizerId);
+  const mine = boughtBy(viewer, ev.id);
   return {
     id: ev.id, title: ev.title, category: ev.category, description: ev.description,
     startsAt: ev.startsAt, endsAt: ev.endsAt, venue: ev.venue, address: ev.address, city: ev.city,
@@ -252,7 +253,7 @@ function publicEvent(ev, viewer) {
     isOwner: !!viewer && (viewer.id === ev.organizerId || viewer.role === 'admin'),
     // Private ticket types (comps, guest list, staff…) are only visible to the event's organizer and admins.
     tiers: ev.tiers.filter((t) => t.visibility !== 'private' || (!!viewer && (viewer.id === ev.organizerId || viewer.role === 'admin')))
-      .map((t) => ({ id: t.id, name: t.name, description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public', kind: tierKind(t), price: t.price, suggested: t.suggested ?? null, salesStart: t.salesStart || null, salesEnd: t.salesEnd || null, saleState: tierSaleState(t), onSale: tierOnSale(t), remaining: Math.max(0, t.quantity - t.sold), fee: ticketFee(t.price) })),
+      .map((t) => ({ id: t.id, name: t.name, description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public', kind: tierKind(t), price: t.price, suggested: t.suggested ?? null, salesStart: t.salesStart || null, salesEnd: t.salesEnd || null, saleState: tierSaleState(t), onSale: tierOnSale(t), maxPerPerson: t.maxPerPerson || null, boughtByYou: mine[t.id] || 0, remaining: Math.max(0, t.quantity - t.sold), fee: ticketFee(t.price) })),
   };
 }
 const isPublicTier = (t) => t.visibility !== 'private';
@@ -267,6 +268,16 @@ function tierSaleState(t) {
   return 'open';
 }
 const tierOnSale = (t) => tierSaleState(t) === 'open';
+// tickets of each type this person already bought for the event (refunded and complimentary orders don't count)
+function boughtBy(user, eventId) {
+  const out = {};
+  if (!user) return out;
+  for (const o of db.orders) {
+    if (o.userId !== user.id || o.eventId !== eventId || o.status === 'refunded' || o.comp) continue;
+    for (const i of o.items) out[i.tierId] = (out[i.tierId] || 0) + i.qty;
+  }
+  return out;
+}
 // Lowest open public price, for "From $X" labels
 function lowestPrice(tiers) {
   const avail = tiers.filter((t) => t.visibility !== 'private' && t.quantity - t.sold > 0);
@@ -393,7 +404,13 @@ function validateEvent(b, existing) {
       if (d > end) fail(400, `Sales for "${name}" must end by the time the event ends`);
       salesEnd = d.toISOString();
     }
-    return { id: old ? old.id : newId('tier'), name, description, visibility, kind, price, ...(kind === 'donation' ? { suggested } : {}), salesStart, salesEnd, quantity, sold: old ? old.sold : 0, comped: old ? (old.comped || 0) : 0 };
+    // optional: most tickets of this type one person (account) can buy, across all their orders
+    let maxPerPerson = null;
+    if (t.maxPerPerson !== undefined && t.maxPerPerson !== null && String(t.maxPerPerson).trim() !== '') {
+      maxPerPerson = Number(t.maxPerPerson);
+      if (!Number.isInteger(maxPerPerson) || maxPerPerson < 1 || maxPerPerson > 100) fail(400, `Max per person for "${name}" must be a whole number from 1 to 100`);
+    }
+    return { id: old ? old.id : newId('tier'), name, description, visibility, kind, price, ...(kind === 'donation' ? { suggested } : {}), salesStart, salesEnd, maxPerPerson, quantity, sold: old ? old.sold : 0, comped: old ? (old.comped || 0) : 0 };
   });
   for (const o of oldTiers) {
     if (o.sold > 0 && !tiers.some((t) => t.id === o.id)) fail(400, `"${o.name}" has sales and can't be removed`);
@@ -1001,9 +1018,13 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
   for (const it of items) {
     const qty = Number(it.qty);
     if (!qty) continue;
-    if (!Number.isInteger(qty) || qty < 0 || qty > 10) fail(400, 'You can buy up to 10 of each ticket type');
+    if (!Number.isInteger(qty) || qty < 0 || qty > 100) fail(400, 'You can buy up to 100 of each ticket type');
     const tier = ev.tiers.find((t) => t.id === it.tierId && isPublicTier(t)) || fail(400, 'Unknown ticket type');
     if (tier.quantity - tier.sold < qty) fail(409, `Only ${tier.quantity - tier.sold} "${tier.name}" tickets left`);
+    if (tier.maxPerPerson) {
+      const have = boughtBy(user, ev.id)[tier.id] || 0;
+      if (have + qty > tier.maxPerPerson) fail(400, have ? `"${tier.name}" is limited to ${tier.maxPerPerson} per person and you already have ${have}` : `"${tier.name}" is limited to ${tier.maxPerPerson} per person`);
+    } else if (qty > 10) fail(400, 'You can buy up to 10 of each ticket type');
     if (tierSaleState(tier) === 'soon') fail(400, `"${tier.name}" tickets are not on sale yet`);
     if (tierSaleState(tier) === 'closed') fail(400, `Sales for "${tier.name}" have ended`);
     // Donation tickets: the buyer picks the amount (per ticket), at least the organizer's minimum

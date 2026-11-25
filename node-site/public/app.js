@@ -73,6 +73,8 @@ function tierSaleState(t) {
   return 'open';
 }
 const tierOnSaleNow = (t) => tierSaleState(t) === 'open';
+// how many of this ticket type the visitor can still pick (per-person limit, or 10 per order)
+const tierCap = (t) => Math.max(0, Math.min(t.remaining, t.maxPerPerson ? t.maxPerPerson - (t.boughtByYou || 0) : 10));
 function nextSaleStart(ev) { return ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private' && tierSaleState(t) === 'soon').map((t) => t.salesStart).sort()[0] || null; }
 function salesClosed(ev) { const a = ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private'); return a.length > 0 && a.every((t) => tierSaleState(t) === 'closed'); }
 // "Nov 25, 2:00 PM – Nov 30, 11:59 PM" for a ticket type's sales window
@@ -103,7 +105,7 @@ function countdownState(startsAt, endsAt) {
 }
 function countdownHtml(ev, big = false) {
   const attrs = `data-cd="${esc(ev.startsAt)}" data-cd-end="${esc(ev.endsAt)}"`;
-  if (big) return `<div class="cd-big" ${attrs} aria-live="off"><div class="cd-big-label">⏳ This event goes live in</div><div class="cd-big-boxes">${['Days', 'Hours', 'Minutes', 'Seconds'].map((l, i) => `<div class="cd-box"><b data-cd-u="${i}">--</b><span>${l}</span></div>`).join('')}</div><div class="cd-big-msg"></div></div>`;
+  if (big) return `<div class="cd-big${big === 'card' ? ' cd-card' : ''}" ${attrs} aria-live="off"><div class="cd-big-label">${big === 'card' ? '⏳ Goes live in' : '⏳ This event goes live in'}</div><div class="cd-big-boxes">${['Days', 'Hours', 'Minutes', 'Seconds'].map((l, i) => `<div class="cd-box"><b data-cd-u="${i}">--</b><span>${l}</span></div>`).join('')}</div><div class="cd-big-msg"></div></div>`;
   return `<span class="cd-chip" ${attrs}>⏳ <span class="cd-txt">…</span></span>`;
 }
 function tickCountdowns() {
@@ -145,7 +147,7 @@ const card = (ev) => `
       <h3>${esc(ev.title)}</h3>
       <div class="muted small">${esc(ev.venue)} · ${esc(ev.city)}${(ev.extraVenues || []).length ? ` <span class="more-dates">+${ev.extraVenues.length} venue${ev.extraVenues.length > 1 ? 's' : ''}</span>` : ''}</div>
       <div class="muted small">By ${esc(ev.organizer)}</div>
-      <div class="card-cd">${countdownHtml(ev)}</div>
+      <div class="card-cd">${countdownHtml(ev, 'card')}</div>
       <div class="card-buy"><span class="price">${priceFrom(ev)}</span>${lowestTier(ev) ? '<span class="btn btn-primary btn-sm card-get">Get tickets →</span>' : '<span class="btn btn-ghost btn-sm card-get off">View event</span>'}</div>
       <div class="card-foot"><span class="card-foot-r"><span class="tag">${esc(ev.category)}</span><button class="card-share" data-share="${esc(ev.id)}" title="Share this event" aria-label="Share ${esc(ev.title)}">${SHARE_ICON}</button></span></div>
     </div>
@@ -718,7 +720,7 @@ async function pageEvent(id) {
           <div class="muted small">Sales ended ${esc(fmtLong(t.salesEnd))}</div></div>
         <span class="badge">Sales ended</span>
       </div>`;
-      const max = Math.min(10, t.remaining);
+      const max = tierCap(t);
       const opts = Array.from({ length: max + 1 }, (_, i) => `<option ${i === qty[t.id] ? 'selected' : ''}>${i}</option>`).join('');
       return `<div class="tier">
         <div><div class="tier-name">${esc(t.name)}</div>
@@ -728,8 +730,9 @@ async function pageEvent(id) {
             : tierKindOf(t) === 'free' || t.price === 0 ? '<span class="kind-badge free">🎁 Free</span>' : `<strong>${money(t.price)}</strong> <span class="muted">+ ${money(t.fee)} fee</span>`}</div>
           ${tierKindOf(t) === 'donation' && qty[t.id] > 0 ? `<label class="don-amt"><span>Your donation per ticket</span><span class="don-in">$<input type="number" inputmode="decimal" min="${t.price}" step="0.01" data-amt="${esc(t.id)}" value="${esc(amt[t.id])}" /></span></label>${amtOk(t) ? '' : `<div class="error small" style="margin:6px 0 0">Minimum is ${money(t.price)}</div>`}` : ''}
           <div class="muted small">${t.remaining > 0 ? (t.remaining <= 20 ? `Only ${t.remaining} left!` : 'Available') : 'Sold out'}${salesWindowText(t) ? ' · ' + esc(salesWindowText(t)) : ''}</div>
+          ${t.maxPerPerson ? `<div class="limit-note">👤 Limit ${t.maxPerPerson} per person${t.boughtByYou ? ` · you have ${t.boughtByYou}` : ''}</div>` : ''}
           </div>
-        ${t.remaining > 0 && buyable ? `<select data-tier="${esc(t.id)}">${opts}</select>` : '<span class="badge soldout">Sold out</span>'}
+        ${t.remaining > 0 && buyable ? (max > 0 ? `<select data-tier="${esc(t.id)}">${opts}</select>` : '<span class="badge">Limit reached</span>') : '<span class="badge soldout">Sold out</span>'}
         ${t.salesEnd && t.remaining > 0 && buyable ? `<div class="tier-cd"><span class="cd-chip sale-end" data-cd-kind="saleEnd" data-cd="${esc(t.salesEnd)}" data-cd-end="${esc(t.salesEnd)}">⌛ <span class="cd-txt">…</span></span></div>` : ''}
       </div>`;
     }).join('');
@@ -761,7 +764,7 @@ async function pageEvent(id) {
   // restore cart after login redirect
   try {
     const saved = JSON.parse(sessionStorage.getItem('tj_cart') || 'null');
-    if (saved && saved.id === ev.id) for (const t of ev.tiers) { qty[t.id] = Math.min(saved.qty[t.id] || 0, t.remaining, 10); if (saved.amt && saved.amt[t.id] !== undefined && tierKindOf(t) === 'donation') amt[t.id] = saved.amt[t.id]; }
+    if (saved && saved.id === ev.id) for (const t of ev.tiers) { qty[t.id] = Math.min(saved.qty[t.id] || 0, tierCap(t)); if (saved.amt && saved.amt[t.id] !== undefined && tierKindOf(t) === 'donation') amt[t.id] = saved.amt[t.id]; }
   } catch {}
   renderPicker();
 }
@@ -778,7 +781,7 @@ async function pageCheckout(id) {
   let saved = null;
   try { saved = JSON.parse(sessionStorage.getItem('tj_cart') || 'null'); } catch {}
   const qty = {};
-  for (const t of ev.tiers) if (t.visibility !== 'private') qty[t.id] = saved && saved.id === ev.id ? Math.min(saved.qty[t.id] || 0, t.remaining, 10) : 0;
+  for (const t of ev.tiers) if (t.visibility !== 'private') qty[t.id] = saved && saved.id === ev.id ? Math.min(saved.qty[t.id] || 0, tierCap(t)) : 0;
   const lines = ev.tiers.filter((t) => qty[t.id] > 0);
   const amt = {};
   for (const t of lines) amt[t.id] = tierKindOf(t) === 'donation' ? Math.max(t.price, round2(Number(saved?.amt?.[t.id] ?? t.suggested ?? t.price)) || 0) : tierKindOf(t) === 'free' ? 0 : t.price;
@@ -1327,6 +1330,7 @@ async function pageEventForm(id) {
       tiers[i].ssDate = row.querySelector('[data-k=ssDate]').value; tiers[i].ssTime = row.querySelector('[data-k=ssTime]').value;
       tiers[i].seDate = row.querySelector('[data-k=seDate]').value; tiers[i].seTime = row.querySelector('[data-k=seTime]').value;
       tiers[i].quantity = row.querySelector('[data-k=quantity]').value;
+      tiers[i].maxPerPerson = row.querySelector('[data-k=maxPerPerson]').value;
       tiers[i].description = row.querySelector('[data-k=description]').value;
       tiers[i].visibility = row.querySelector('[data-k=visibility]').value;
     });
@@ -1342,6 +1346,7 @@ async function pageEventForm(id) {
         <div class="field ${tierKindOf(t) === 'free' ? 'hidden' : ''}" data-f="price"><label>${tierKindOf(t) === 'donation' ? 'Minimum donation ($)' : 'Price ($)'}</label><input data-k="price" type="number" min="${tierKindOf(t) === 'paid' ? '0.01' : '0'}" step="0.01" value="${esc(tierKindOf(t) === 'free' ? 0 : t.price)}" ${t.sold ? 'readonly title="Price locked after sales"' : ''} ${tierKindOf(t) === 'free' ? '' : 'required'} /></div>
         <div class="field ${tierKindOf(t) === 'donation' ? '' : 'hidden'}" data-f="suggested"><label>Suggested ($) <span class="muted small">(optional)</span></label><input data-k="suggested" type="number" min="0" step="0.01" value="${esc(t.suggested ?? '')}" placeholder="e.g. 20" /></div>
         <div class="field"><label>Quantity${t.sold ? ` <span class="muted small">(${t.sold} used)</span>` : ''}</label><input data-k="quantity" type="number" min="${t.sold || 1}" step="1" value="${esc(t.quantity)}" required /></div>
+        <div class="field"><label>Max per person <span class="muted small">(optional)</span></label><input data-k="maxPerPerson" type="number" min="1" max="100" step="1" value="${esc(t.maxPerPerson ?? '')}" placeholder="No limit" title="Most tickets of this type one person can buy (1–100). Empty = up to 10 per order." /></div>
         <div class="field"><label>Visibility</label><select data-k="visibility">
           <option value="public" ${t.visibility !== 'private' ? 'selected' : ''}>🌐 Public — on sale</option>
           <option value="private" ${t.visibility === 'private' ? 'selected' : ''}>🔒 Private — hidden</option></select></div>
@@ -1503,7 +1508,7 @@ async function pageEventForm(id) {
       ...f, ...extra, imageUrl, imageShareUrl, lat: geo.lat, lng: geo.lng, geoPrecision: geo.geoPrecision,
       startsAt: new Date(f.startsAt).toISOString(), endsAt: new Date(f.endsAt).toISOString(),
       tiers: tiers.map((t) => ({ id: t.id, name: t.name, kind: t.kind || 'paid', price: t.kind === 'free' ? 0 : Number(t.price), suggested: t.kind === 'donation' && t.suggested !== '' && t.suggested !== null && t.suggested !== undefined ? Number(t.suggested) : null,
-        salesStart: joinLocal(t.ssDate, t.ssTime, '00:00'), salesEnd: joinLocal(t.seDate, t.seTime, '23:59'), quantity: Number(t.quantity), description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public' })),
+        salesStart: joinLocal(t.ssDate, t.ssTime, '00:00'), salesEnd: joinLocal(t.seDate, t.seTime, '23:59'), maxPerPerson: t.maxPerPerson !== '' && t.maxPerPerson !== null && t.maxPerPerson !== undefined ? Number(t.maxPerPerson) : null, quantity: Number(t.quantity), description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public' })),
     };
     const btn = document.getElementById('saveBtn'); btn.disabled = true;
     try {

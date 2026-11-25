@@ -337,14 +337,26 @@ class TJ_Rest {
     return $best ? array('priceFrom' => $best['price'], 'priceKind' => self::tier_kind($best), 'soldOut' => false) : array('priceFrom' => null, 'priceKind' => null, 'soldOut' => $next === null && !($avail > 0 && $closed === $avail), 'salesStart' => $next, 'salesClosed' => $next === null && $avail > 0 && $closed === $avail);
   }
 
+  /** Tickets of each type this person already bought for the event (refunded and complimentary orders don't count). */
+  public static function bought_by($user, $event_id) {
+    $out = array();
+    if (!$user) return $out;
+    foreach (TJ_Store::orders() as $o) {
+      if ((int) $o['userId'] !== (int) $user['id'] || $o['eventId'] !== $event_id || $o['status'] === 'refunded' || !empty($o['comp'])) continue;
+      foreach ($o['items'] as $i) $out[$i['tierId']] = (isset($out[$i['tierId']]) ? $out[$i['tierId']] : 0) + (int) $i['qty'];
+    }
+    return $out;
+  }
+
   public static function public_event($ev, $viewer) {
     $org = TJ_Store::user_by_id($ev['organizerId']);
+    $mine = self::bought_by($viewer, $ev['id']);
     $own = $viewer && ($viewer['id'] === (int) $ev['organizerId'] || $viewer['role'] === 'admin');
     $tiers = array();
     foreach ($ev['tiers'] as $t) {
       if (self::g($t, 'visibility') === 'private' && !$own) continue;
       $tiers[] = array('id' => $t['id'], 'name' => $t['name'], 'description' => (string) self::g($t, 'description', ''), 'visibility' => self::g($t, 'visibility') === 'private' ? 'private' : 'public',
-        'kind' => self::tier_kind($t), 'price' => $t['price'], 'suggested' => self::g($t, 'suggested'), 'salesStart' => self::g($t, 'salesStart'), 'salesEnd' => self::g($t, 'salesEnd'), 'saleState' => self::tier_sale_state($t), 'onSale' => self::tier_on_sale($t), 'remaining' => max(0, $t['quantity'] - $t['sold']), 'fee' => self::n(self::ticket_fee($t['price'])));
+        'kind' => self::tier_kind($t), 'price' => $t['price'], 'suggested' => self::g($t, 'suggested'), 'salesStart' => self::g($t, 'salesStart'), 'salesEnd' => self::g($t, 'salesEnd'), 'saleState' => self::tier_sale_state($t), 'onSale' => self::tier_on_sale($t), 'maxPerPerson' => self::g($t, 'maxPerPerson') ? (int) $t['maxPerPerson'] : null, 'boughtByYou' => isset($mine[$t['id']]) ? $mine[$t['id']] : 0, 'remaining' => max(0, $t['quantity'] - $t['sold']), 'fee' => self::n(self::ticket_fee($t['price'])));
     }
     return array(
       'id' => $ev['id'], 'title' => $ev['title'], 'category' => $ev['category'], 'description' => $ev['description'],
@@ -474,9 +486,17 @@ class TJ_Rest {
         if ($sems > TJ_Store::ts_ms(self::iso_ms($end))) self::fail(400, 'Sales for "' . $name . '" must end by the time the event ends');
         $salesEnd = self::iso_ms($sems);
       }
+      // optional: most tickets of this type one person (account) can buy, across all their orders
+      $maxPerPerson = null;
+      $mraw = self::g($t, 'maxPerPerson');
+      if ($mraw !== null && is_scalar($mraw) && trim((string) $mraw) !== '') {
+        $mv = self::numk($t, 'maxPerPerson');
+        if (!self::is_integer_num($mv) || $mv < 1 || $mv > 100) self::fail(400, 'Max per person for "' . $name . '" must be a whole number from 1 to 100');
+        $maxPerPerson = (int) $mv;
+      }
       $tiers[] = array(
         'id' => $old ? $old['id'] : TJ_Store::new_id('tier'), 'name' => $name, 'description' => $tdesc,
-        'visibility' => self::g($t, 'visibility') === 'private' ? 'private' : 'public', 'kind' => $kind, 'price' => self::n($price), 'suggested' => $kind === 'donation' && $suggested !== null ? self::n($suggested) : null, 'salesStart' => $salesStart, 'salesEnd' => $salesEnd, 'quantity' => (int) $quantity,
+        'visibility' => self::g($t, 'visibility') === 'private' ? 'private' : 'public', 'kind' => $kind, 'price' => self::n($price), 'suggested' => $kind === 'donation' && $suggested !== null ? self::n($suggested) : null, 'salesStart' => $salesStart, 'salesEnd' => $salesEnd, 'maxPerPerson' => $maxPerPerson, 'quantity' => (int) $quantity,
         'sold' => $old ? (int) $old['sold'] : 0, 'comped' => $old ? (int) self::g($old, 'comped', 0) : 0,
       );
     }
@@ -957,12 +977,17 @@ class TJ_Rest {
       if (!is_array($it)) $it = array();
       $qty = self::numk($it, 'qty');
       if (is_nan($qty) || !$qty) continue;
-      if (!self::is_integer_num($qty) || $qty < 0 || $qty > 10) self::fail(400, 'You can buy up to 10 of each ticket type');
+      if (!self::is_integer_num($qty) || $qty < 0 || $qty > 100) self::fail(400, 'You can buy up to 100 of each ticket type');
       $ti = null;
       foreach ($ev['tiers'] as $k => $t) if ($t['id'] === self::g($it, 'tierId') && self::is_public_tier($t)) { $ti = $k; break; }
       if ($ti === null) self::fail(400, 'Unknown ticket type');
       $tier = $ev['tiers'][$ti];
       if ($tier['quantity'] - $tier['sold'] < $qty) self::fail(409, 'Only ' . ($tier['quantity'] - $tier['sold']) . ' "' . $tier['name'] . '" tickets left');
+      $mpp = (int) self::g($tier, 'maxPerPerson', 0);
+      if ($mpp) {
+        $mine = self::bought_by($user, $ev['id']); $have = isset($mine[$tier['id']]) ? $mine[$tier['id']] : 0;
+        if ($have + $qty > $mpp) self::fail(400, '"' . $tier['name'] . '" is limited to ' . $mpp . ' per person' . ($have ? ' and you already have ' . $have : ''));
+      } elseif ($qty > 10) self::fail(400, 'You can buy up to 10 of each ticket type');
       if (self::tier_sale_state($tier) === 'soon') self::fail(400, '"' . $tier['name'] . '" tickets are not on sale yet');
       if (self::tier_sale_state($tier) === 'closed') self::fail(400, 'Sales for "' . $tier['name'] . '" have ended');
       // donation tickets: the buyer picks the amount per ticket, at least the organizer's minimum
