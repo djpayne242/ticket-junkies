@@ -250,3 +250,13 @@ In **Create Event → Date & time** there are two dropdowns:
   - **Organizers:** add one or more by picking a saved name or typing a new one. All of them show as "Presented by A & B" on the event page, tickets, emails and reports. At least one is required (up to 10).
   - **Location:** "Choose a saved venue" fills in the main venue, address, city and map pin. **More venues** adds extra places for events held at more than one venue (up to 10 in total). Pick a saved venue or type one in; a saved venue's address fills in by itself.
   - **Event page:** lists every venue with its own Directions link. Event cards show "+N venues".
+
+## Speed, phones, browsers and social media
+- **Faster loading:** the homepage now downloads about **87 KB instead of 333 KB** on a first visit. Pages, scripts and styles are compressed (Brotli or gzip). Versioned files are cached by the browser for a year, and repeat visits re-check only the page itself. The scripts no longer block the page from drawing, and fonts load in the background.
+- **Lighter images:** event pictures load only when they scroll into view. New flyers are resized in the browser before upload (max 1600 px). The two existing 1.26 MB flyers were replaced with 119 KB copies that look the same. The site icon dropped from 47 KB to 3 KB.
+- **Phones:** iPhone notch and home-bar safe areas are respected, tap targets are at least 44 px, there's no zoom when typing on iOS, and you can add the site to the home screen (app icon + `manifest.webmanifest`). Animations are reduced for people who prefer less motion.
+- **Browsers:** the code avoids features older browsers don't support. It adds `-webkit-` prefixes for Safari and a fallback layout for Safari 14 and older. It works in Chrome, Safari (Mac, iPhone, iPad), Firefox, Edge and Samsung Internet.
+- **Social media and Google:**
+  - The homepage has Open Graph and Twitter/X preview tags with full image addresses. Event share links (`/e/<id>`) also add Google "Event" data (date, venue, price, availability).
+  - There's a `robots.txt` and an automatic `sitemap.xml` listing every upcoming event.
+- **WordPress plugin:** scripts load deferred, fonts preconnect, there's an iPhone home-screen icon, and social preview tags are added unless an SEO plugin (Yoast, Rank Math, AIOSEO or SEOPress) already does it.
