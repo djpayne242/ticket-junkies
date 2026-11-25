@@ -28,6 +28,15 @@ The owner account controls the Admin Panel and can also post events ("My Events"
 
 **Countdowns:** every event card shows a large "⏳ Goes live in" countdown with Days / Hours / Minutes / Seconds boxes counting down to the event's start time, the event page has a large "This event goes live in" Days / Hours / Minutes / Seconds countdown, and the calendar pop-up shows one too. When the event starts it switches to "Live now" ("🔴 This event is LIVE now!" on the event page), then "Ended".
 
+**Log in & security (Admin → Settings → 🔐 Log in & security):**
+- **Log-in timer:** how long attendees/organizers stay logged in, and a separate (usually shorter) time for administrators, from 1 hour to 90 days.
+- **Automatic log-out after no activity:** off, or 5 minutes to 4 hours. A "Still there?" warning with a **Stay logged in** button appears 1 minute before. Activity in any open tab counts. The server also ends idle sessions, and the log-in page explains why the person was logged out.
+- **Wrong passwords:** lock the log-in after 3, 5 or 10 wrong tries for 5 minutes to 1 day (or off). The last 2 tries show a warning.
+- **Passwords:** turn the "Forgot your password?" link on/off, choose how long reset links work (15 minutes to 1 day), and set the shortest password allowed (8–16 characters).
+- **Buttons:** **Log everyone else out now**. On each user page: **Send password reset link** and **Log out of all devices**.
+- **Stand-alone site:** reset emails link to `#/reset?token=…`. Links can be used once, there are at most 3 open links per person, and the forgot form gives the same answer whether or not the email has an account.
+- **WordPress:** uses WordPress's own reset email and page, with these time limits applied. New time limits apply from the next log-in.
+
 **Admin menu:** the Admin Panel tabs (Overview, Users, Organizers … Settings) sit on one slim line. On narrower screens the line scrolls sideways instead of wrapping onto a second row.
 
 **Preloader (Admin → Settings → Preloader):** a small icon in the middle of the screen while a page opens or refreshes, and when moving between pages. It shows no "Loading" text. Pick one of 8 built-in icons (TicketJunkies, ticket, vinyl record, ring, music, star, lightning, heart) or upload your own PNG/JPG/WEBP/GIF (up to 2 MB). Choose its size (24–160 px), animation (spin, pulse, rumble, flash, bounce, flip or stand still), speed (slow/normal/fast) and background (cover the page, see-through dim, or icon only). It has an on/off switch, a live preview and a "Try it full screen" button. The stand-alone site puts it into the page itself, so it appears before anything else draws. In WordPress it is added at the top of every page and also shows when you click a link to another page. Saving clears the LiteSpeed page cache so the change shows straight away. It always hides after 8 seconds at most.

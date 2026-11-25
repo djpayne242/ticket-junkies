@@ -138,6 +138,8 @@ function migrate() {
     weatherPlace: 'Nassau, Bahamas', weatherLat: 25.0582, weatherLng: -77.3431,
     ...(db.settings.maps || {}),
   };
+  db.settings.security = { sessionHours: 720, adminSessionHours: 720, idleMinutes: 0, maxAttempts: 5, lockMinutes: 15, allowReset: true, resetMinutes: 60, minPassword: 8, ...(db.settings.security || {}) };
+  db.resets ||= [];
   db.settings.preloader = { enabled: true, icon: 'logo', customUrl: '', size: 56, animation: 'pulse', speed: 'normal', background: 'page', ...(db.settings.preloader || {}) };
   for (const u of db.users) u.phone ??= '';
   for (const o of db.orders) {
@@ -202,19 +204,38 @@ function parseCookies(req) {
   }
   return out;
 }
+// Log-in & security settings (Admin → Settings → Log in & security)
+const SEC = () => db.settings.security;
+const sessionMs = (user) => (user.role === 'admin' ? SEC().adminSessionHours : SEC().sessionHours) * 3600000;
+let sessSaveT = null;
+const saveSessionsSoon = () => { if (!sessSaveT) sessSaveT = setTimeout(() => { sessSaveT = null; saveDb(); }, 10000); };
 function currentUser(req) {
   const token = parseCookies(req).tj_session;
   const s = token && db.sessions[token];
   if (!s) return null;
-  if (s.expires < Date.now()) { delete db.sessions[token]; return null; }
+  const now = Date.now();
   const user = db.users.find((u) => u.id === s.userId);
-  return user && !user.suspended ? user : null;
+  const created = s.created || s.expires - SESSION_DAYS * 86400000;
+  const idle = SEC().idleMinutes * 60000;
+  // Ends the session when it is past its time limit, or nobody used it for longer than the idle limit.
+  if (!user || s.expires < now || created + sessionMs(user) < now || (idle && s.lastSeen && now - s.lastSeen > idle)) { delete db.sessions[token]; saveSessionsSoon(); return null; }
+  if (!s.lastSeen || now - s.lastSeen > 60000) { s.lastSeen = now; saveSessionsSoon(); }
+  return !user.suspended ? user : null;
 }
 function startSession(res, user) {
   const token = crypto.randomBytes(32).toString('hex');
-  db.sessions[token] = { userId: user.id, expires: Date.now() + SESSION_DAYS * 86400000 };
-  res.setHeader('Set-Cookie', `tj_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`);
+  const now = Date.now(), ms = sessionMs(user);
+  db.sessions[token] = { userId: user.id, created: now, lastSeen: now, expires: now + ms };
+  res.setHeader('Set-Cookie', `tj_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.round(ms / 1000)}`);
 }
+function checkPassword(pw, label = 'Password') {
+  const n = SEC().minPassword;
+  if (pw.length < n) fail(400, `${label} must be at least ${n} characters`);
+  if (pw.length > 200) fail(400, `${label} is too long`);
+}
+const durLabel = (min) => min % 1440 === 0 ? `${min / 1440} day${min === 1440 ? '' : 's'}` : min % 60 === 0 ? `${min / 60} hour${min === 60 ? '' : 's'}` : `${min} minute${min === 1 ? "" : "s"}`;
+const sha256 = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+const loginFails = new Map(); // email -> { count, until }
 const publicUser = (u) => u && ({ id: u.id, name: u.name, email: u.email, phone: u.phone || '', role: u.role, organization: u.organization, suspended: !!u.suspended });
 const requireUser = (req) => currentUser(req) || fail(401, 'Please log in first');
 function requireOrganizer(req) {
@@ -504,6 +525,15 @@ function alertAdmin(kind, subject, opts) {
 }
 
 const Notify = {
+  passwordReset(u, link, valid) {
+    mail(u.email, 'Reset your TicketJunkies password', {
+      tag: 'user.passwordReset',
+      heading: 'Reset your password',
+      preheader: `Choose a new password. This link works for ${valid}.`,
+      body: `<p>Hi ${h(u.name.split(' ')[0])},</p><p>We got a request to reset the password for your TicketJunkies account. Tap the button below to choose a new one. The link works for <strong>${h(valid)}</strong> and can be used only once.</p><p>If you didn't ask for this, you can ignore this email. Your password won't change.</p>`,
+      cta: { label: 'Choose a new password', url: link },
+    });
+  },
   registered(u) {
     const organizer = u.role === 'organizer';
     alertAdmin(organizer ? 'organizerSignup' : 'userSignup', organizer ? `New organizer: ${u.organization || u.name}` : `New user: ${u.name}`, {
@@ -764,6 +794,7 @@ route('GET', '/api/meta', () => {
     maps: { googleMapsKey: m.googleMapsKey, center: { lat: m.weatherLat, lng: m.weatherLng } },
     captcha: captchaPublic(),
     preloader: db.settings.preloader,
+    security: { idleMinutes: SEC().idleMinutes, allowReset: SEC().allowReset, minPassword: SEC().minPassword },
     weatherPlace: { name: m.weatherPlace, lat: m.weatherLat, lng: m.weatherLng },
   };
 });
@@ -790,7 +821,7 @@ route('POST', '/api/auth/register', async ({ req, body, res }) => {
   const email = str(body.email, { name: 'Email', max: 160, required: true }).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'Enter a valid email address');
   const password = typeof body.password === 'string' ? body.password : '';
-  if (password.length < 8) fail(400, 'Password must be at least 8 characters');
+  checkPassword(password);
   const role = ['organizer', 'promoter'].includes(body.role) ? 'organizer' : 'user';
   const organization = str(body.organization, { name: 'Organizer name', max: 100, required: role === 'organizer' });
   if (db.users.some((u) => u.email === email)) fail(409, 'An account with this email already exists');
@@ -810,7 +841,24 @@ route('POST', '/api/auth/register', async ({ req, body, res }) => {
 route('POST', '/api/auth/login', ({ body, res }) => {
   const email = str(body.email, { name: 'Email', max: 160, required: true }).toLowerCase();
   const user = db.users.find((u) => u.email === email);
-  if (!user || !verifyPassword(String(body.password || ''), user.passwordHash)) fail(401, 'Incorrect email or password');
+  const sec = SEC(), now = Date.now();
+  let lf = loginFails.get(email);
+  if (lf && lf.until && lf.until <= now) { loginFails.delete(email); lf = null; }
+  const lockMsg = (until) => `Too many wrong tries. Please wait ${Math.max(1, Math.ceil((until - Date.now()) / 60000))} minute(s) and try again${sec.allowReset ? ', or reset your password' : ''}.`;
+  if (sec.maxAttempts && lf && lf.until) fail(429, lockMsg(lf.until));
+  if (!user || !verifyPassword(String(body.password || ''), user.passwordHash)) {
+    if (sec.maxAttempts) {
+      lf = lf || { count: 0, until: 0 };
+      lf.count++;
+      if (loginFails.size > 5000) loginFails.clear();
+      loginFails.set(email, lf);
+      if (lf.count >= sec.maxAttempts) { lf.until = now + sec.lockMinutes * 60000; fail(429, lockMsg(lf.until)); }
+      const left = sec.maxAttempts - lf.count;
+      if (left <= 2) fail(401, `Incorrect email or password (${left} ${left === 1 ? 'try' : 'tries'} left)`);
+    }
+    fail(401, 'Incorrect email or password');
+  }
+  loginFails.delete(email);
   if (user.suspended) fail(403, 'This account has been suspended. Please contact support.');
   user.lastLoginAt = new Date().toISOString();
   for (const o of db.orders) if (!o.userId && String(o.buyerEmail || '').toLowerCase() === email) o.userId = user.id;
@@ -828,6 +876,44 @@ route('POST', '/api/auth/logout', ({ req, res }) => {
 });
 
 route('GET', '/api/auth/me', ({ req }) => ({ user: publicUser(currentUser(req)) }));
+
+// ---------- password reset ----------
+function sendReset(u, byAdmin = false) {
+  const now = Date.now();
+  db.resets = db.resets.filter((r) => r.expires > now);
+  if (!byAdmin && db.resets.filter((r) => r.userId === u.id).length >= 3) return false; // at most 3 open links per person
+  const token = crypto.randomBytes(32).toString('hex');
+  const minutes = SEC().resetMinutes;
+  db.resets.push({ hash: sha256(token), userId: u.id, expires: now + minutes * 60000, createdAt: new Date().toISOString() });
+  saveDb();
+  Notify.passwordReset(u, `${site()}/#/reset?token=${token}`, durLabel(minutes));
+  return true;
+}
+route('POST', '/api/auth/forgot', ({ body }) => {
+  if (!SEC().allowReset) fail(403, 'Password resets are turned off. Please contact support.');
+  const email = str(body.email, { name: 'Email', max: 160, required: true }).toLowerCase();
+  const u = db.users.find((x) => x.email === email);
+  if (u && !u.suspended) sendReset(u);
+  // Same answer whether or not the account exists, so nobody can test which emails are registered.
+  return { ok: true, valid: durLabel(SEC().resetMinutes) };
+});
+route('POST', '/api/auth/reset', ({ body, res }) => {
+  const token = String(body.token || '');
+  const now = Date.now();
+  const r = /^[a-f0-9]{64}$/.test(token) && db.resets.find((x) => x.hash === sha256(token) && x.expires > now);
+  const u = r && db.users.find((x) => x.id === r.userId);
+  if (!u || u.suspended) fail(400, 'This reset link has expired or was already used. Please ask for a new one.');
+  const password = String(body.password || '');
+  checkPassword(password, 'New password');
+  u.passwordHash = hashPassword(password);
+  u.lastLoginAt = new Date().toISOString();
+  db.resets = db.resets.filter((x) => x.userId !== u.id);
+  killSessions(u.id);
+  loginFails.delete(u.email);
+  startSession(res, u);
+  saveDb();
+  return { user: publicUser(u) };
+});
 
 // ---------- homepage search filters (organizer, venue, date, year, time of day) ----------
 const SITE_TZ = 'America/Nassau';
@@ -1260,7 +1346,7 @@ route('POST', '/api/admin/users', ({ req, body }) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'Enter a valid email address');
   if (db.users.some((u) => u.email === email)) fail(409, 'An account with this email already exists');
   const password = String(body.password || '');
-  if (password.length < 8) fail(400, 'Password must be at least 8 characters');
+  checkPassword(password);
   const role = ROLES.includes(body.role) ? body.role : 'user';
   const organization = str(body.organization, { name: 'Organizer name', max: 100 });
   const phone = normalizePhone(body.phone);
@@ -1290,7 +1376,7 @@ route('PUT', '/api/admin/users/:id', ({ req, body, params }) => {
   if (self && next.suspended) fail(400, "You can't suspend your own account");
   if (u.role === 'admin' && (next.role !== 'admin' || next.suspended) && activeAdmins().length <= 1) fail(400, 'At least one active administrator is required');
   if (body.password) {
-    if (String(body.password).length < 8) fail(400, 'New password must be at least 8 characters');
+    checkPassword(String(body.password), 'New password');
     u.passwordHash = hashPassword(String(body.password));
     killSessions(u.id, parseCookies(req).tj_session);
   }
@@ -1527,10 +1613,49 @@ const SECRET_KEYS = ['resendApiKey', 'twilioToken'];
 function settingsView() {
   const n = { ...N() };
   for (const k of SECRET_KEYS) n[k] = n[k] ? '••••' + n[k].slice(-4) : '';
-  return { feePercent: db.settings.feePercent, feeFixed: db.settings.feeFixed, notifications: n, maps: db.settings.maps, preloader: db.settings.preloader, captcha: { ...db.settings.captcha, secretKey: db.settings.captcha.secretKey ? '••••' + db.settings.captcha.secretKey.slice(-4) : '', testKeys: db.settings.captcha.siteKey === RECAPTCHA_TEST_SITE }, defaultAdminRecipients: activeAdmins().map((u) => u.email) };
+  return { feePercent: db.settings.feePercent, feeFixed: db.settings.feeFixed, notifications: n, maps: db.settings.maps, preloader: db.settings.preloader, security: SEC(), captcha: { ...db.settings.captcha, secretKey: db.settings.captcha.secretKey ? '••••' + db.settings.captcha.secretKey.slice(-4) : '', testKeys: db.settings.captcha.siteKey === RECAPTCHA_TEST_SITE }, defaultAdminRecipients: activeAdmins().map((u) => u.email) };
 }
 
 route('GET', '/api/admin/settings', ({ req }) => { requireAdmin(req); return { settings: settingsView() }; });
+
+route('PUT', '/api/admin/security', ({ req, body }) => {
+  requireAdmin(req);
+  const s = { ...SEC() };
+  const int = (k, lo, hi, msg) => { if (body[k] === undefined) return; const n = Number(body[k]); if (!Number.isInteger(n) || n < lo || n > hi) fail(400, msg); s[k] = n; };
+  int('sessionHours', 1, 2160, 'Pick how long people stay logged in');
+  int('adminSessionHours', 1, 2160, 'Pick how long administrators stay logged in');
+  int('idleMinutes', 0, 1440, 'Pick an inactivity time');
+  int('maxAttempts', 0, 20, 'Wrong tries must be between 0 (off) and 20');
+  int('lockMinutes', 1, 1440, 'Lock time must be between 1 minute and 1 day');
+  int('resetMinutes', 10, 1440, 'Reset links must work for between 10 minutes and 1 day');
+  int('minPassword', 8, 64, 'Minimum password length must be between 8 and 64');
+  if (body.allowReset !== undefined) s.allowReset = !!body.allowReset;
+  db.settings.security = s;
+  saveDb();
+  return { settings: settingsView() };
+});
+route('POST', '/api/admin/logout-everyone', ({ req }) => {
+  const admin = requireAdmin(req);
+  const mine = parseCookies(req).tj_session;
+  let n = 0;
+  for (const [t, s] of Object.entries(db.sessions)) if (t !== mine) { delete db.sessions[t]; if (s.userId !== admin.id) n++; }
+  saveDb();
+  return { ok: true, count: n };
+});
+route('POST', '/api/admin/users/:id/send-reset', ({ req, params }) => {
+  requireAdmin(req);
+  const u = db.users.find((x) => x.id === params.id) || fail(404, 'User not found');
+  if (u.suspended) fail(400, 'This account is suspended. Make it active first.');
+  sendReset(u, true);
+  return { ok: true, email: u.email, valid: durLabel(SEC().resetMinutes) };
+});
+route('POST', '/api/admin/users/:id/logout', ({ req, params }) => {
+  const admin = requireAdmin(req);
+  const u = db.users.find((x) => x.id === params.id) || fail(404, 'User not found');
+  killSessions(u.id, u.id === admin.id ? parseCookies(req).tj_session : undefined);
+  saveDb();
+  return { ok: true };
+});
 
 route('PUT', '/api/admin/preloader', ({ req, body }) => {
   requireAdmin(req);

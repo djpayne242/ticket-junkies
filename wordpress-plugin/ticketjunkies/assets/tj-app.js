@@ -508,6 +508,8 @@ async function routePage() {
     if (a === 'checkout' && b) return await pageCheckout(b);
     if (a === 'login') return pageLogin(params);
     if (a === 'register') return pageRegister(params);
+    if (a === 'forgot') return pageForgot(params);
+    if (a === 'reset') return pageReset(params);
     if (a === 'tickets') return needLogin() || (await pageTickets());
     if (a === 'order' && b) return needLogin() || (await pageOrder(b));
     if (a === 't' && b && c) return await pagePublicTickets(b, c);
@@ -519,7 +521,13 @@ async function routePage() {
     if (a === 'admin') return needLogin('admin') || (await pageAdmin(b || 'overview', c, params));
     $app.innerHTML = `<div class="empty"><div class="big">🎟️</div><h2>Page not found</h2><a class="btn btn-primary" href="#/">Go home</a></div>`;
   } catch (e) {
-    if (e.status === 401) return go('#/login?next=' + encodeURIComponent(tjCurrentRoute()));
+    if (e.status === 401) {
+      // Tell people when the site logged them out because they were away too long
+      const mins = META.security && META.security.idleMinutes;
+      let lastActive = 0; try { lastActive = Number(localStorage.getItem('tj_last_active')) || 0; } catch {}
+      const idle = mins && lastActive && Date.now() - lastActive > mins * 60000;
+      return go('#/login?' + (idle ? 'reason=idle&' : '') + 'next=' + encodeURIComponent(tjCurrentRoute()));
+    }
     $app.innerHTML = `<div class="empty"><div class="big">😕</div><h2>${esc(e.message)}</h2><a class="btn btn-primary" href="#/">Go home</a></div>`;
   }
 }
@@ -953,16 +961,26 @@ async function pageCheckout(id) {
   };
 }
 
+// ---------- log in & security helpers ----------
+const minPw = () => (META.security && META.security.minPassword) || 8;
+const resetAllowed = () => !META.security || META.security.allowReset !== false;
+const forgotUrl = () => (window.TJ_CONFIG && TJ_CONFIG.lostPassword) || '#/forgot';
+const durText = (min) => (min % 1440 === 0 ? `${min / 1440} day${min === 1440 ? '' : 's'}` : min % 60 === 0 ? `${min / 60} hour${min === 60 ? '' : 's'}` : `${min} minute${min === 1 ? "" : "s"}`);
+const homeFor = (u) => ({ organizer: '#/dashboard', admin: '#/admin' }[u.role] || '#/tickets');
+
 function pageLogin(params) {
   const next = params.get('next') || '';
+  const reason = params.get('reason');
   $app.innerHTML = `
     <div class="form-page"><div class="form-card">
       <h1 class="display" style="font-size:2rem">Welcome back</h1>
       <p class="muted">${params.get('from') === 'checkout' ? 'Log in to finish checking out — your tickets are still selected.' : 'Log in to buy tickets or manage your events.'}</p>
+      ${reason === 'idle' ? `<div class="notice">🔒 You were logged out after ${esc(durText((META.security && META.security.idleMinutes) || 0))} with no activity. Please log in again.</div>` : ''}
       ${errBox('loginErr')}
       <form id="loginForm">
         <div class="field"><label>Email</label><input name="email" type="email" autocomplete="email" required /></div>
         <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required /></div>
+        ${resetAllowed() ? `<p class="small forgot-row"><a class="forgot-link" href="${esc(forgotUrl())}">Forgot your password?</a></p>` : ''}
         <button class="btn btn-primary btn-block">Log In</button>
       </form>
       <p class="muted small" style="text-align:center;margin-top:16px">New to TicketJunkies? <a href="#/register?role=user${params.get('from') === 'checkout' ? '&from=checkout' : ''}${next ? '&next=' + encodeURIComponent(next) : ''}">Create a free account</a></p>
@@ -972,8 +990,57 @@ function pageLogin(params) {
     try {
       const { user } = await api('/api/auth/login', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
       me = user; toast(`Welcome back, ${user.name.split(' ')[0]}!`);
-      go(next || ({ organizer: '#/dashboard', admin: '#/admin' }[user.role] || '#/tickets'));
+      go(next || homeFor(user));
     } catch (err) { showErr('loginErr', err.message); }
+  };
+}
+
+function pageForgot() {
+  if (!resetAllowed()) { $app.innerHTML = '<div class="empty"><div class="big">🔒</div><h2>Password resets are turned off</h2><p class="muted">Please contact support for help with your account.</p><a class="btn btn-primary" href="#/login">Back to log in</a></div>'; return; }
+  $app.innerHTML = `
+    <div class="form-page"><div class="form-card" id="forgotCard">
+      <h1 class="display" style="font-size:2rem">Forgot your password?</h1>
+      <p class="muted">Enter the email you use for TicketJunkies and we'll send you a link to choose a new password.</p>
+      ${errBox('fErr')}
+      <form id="forgotForm">
+        <div class="field"><label>Email</label><input name="email" type="email" autocomplete="email" required /></div>
+        <button class="btn btn-primary btn-block">Email me a reset link</button>
+      </form>
+      <p class="muted small" style="text-align:center;margin-top:16px"><a href="#/login">Back to log in</a></p>
+    </div></div>`;
+  document.getElementById('forgotForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const email = e.target.email.value.trim();
+    try {
+      const r = await api('/api/auth/forgot', { method: 'POST', body: { email } });
+      document.getElementById('forgotCard').innerHTML = `<h1 class="display" style="font-size:2rem">📧 Check your email</h1><p>If there's a TicketJunkies account for <strong>${esc(email)}</strong>, we've sent it a link to choose a new password. The link works for <strong>${esc(r.valid)}</strong>.</p><p class="muted small">Can't find it? Check your spam or junk folder.</p><a class="btn btn-ghost btn-block" href="#/login">Back to log in</a>`;
+    } catch (err) { showErr('fErr', err.message); }
+  };
+}
+
+function pageReset(params) {
+  const token = params.get('token') || '';
+  $app.innerHTML = `
+    <div class="form-page"><div class="form-card">
+      <h1 class="display" style="font-size:2rem">Choose a new password</h1>
+      <p class="muted">Pick a password you don't use anywhere else.</p>
+      ${errBox('rErr')}
+      <form id="resetForm">
+        <div class="field"><label>New password</label><input name="password" type="password" autocomplete="new-password" minlength="${minPw()}" required /><span class="muted small">At least ${minPw()} characters.</span></div>
+        <div class="field"><label>Type it again</label><input name="confirm" type="password" autocomplete="new-password" minlength="${minPw()}" required /></div>
+        <button class="btn btn-primary btn-block">Save new password</button>
+      </form>
+      <p class="muted small" style="text-align:center;margin-top:16px">Link expired? <a href="#/forgot">Ask for a new one</a></p>
+    </div></div>`;
+  document.getElementById('resetForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    if (f.password.value !== f.confirm.value) return showErr('rErr', "The two passwords don't match");
+    try {
+      const { user } = await api('/api/auth/reset', { method: 'POST', body: { token, password: f.password.value } });
+      me = user; renderNav(); toast("Password changed. You're logged in.");
+      go(homeFor(user));
+    } catch (err) { showErr('rErr', err.message); }
   };
 }
 
@@ -996,7 +1063,7 @@ function pageRegister(params) {
         <div class="field"><label>Mobile number <span class="req">*</span> <span class="muted small">(for ticket texts)</span></label><input name="phone" type="tel" autocomplete="tel" placeholder="242-555-1234" required /></div>
         <div class="field hidden" id="orgField"><label>Organizer name <span class="req">*</span></label><input name="organization" placeholder="e.g. Junkie Nights Entertainment" /><span class="muted small">Your company or brand name. It shows on your event pages and in the Admin Panel.</span></div>
         <div class="field"><label>Email <span class="req">*</span></label><input name="email" type="email" autocomplete="email" required /></div>
-        <div class="field"><label>Password <span class="req">*</span></label><input name="password" type="password" autocomplete="new-password" minlength="8" required /><span class="muted small">At least 8 characters.</span></div>
+        <div class="field"><label>Password <span class="req">*</span></label><input name="password" type="password" autocomplete="new-password" minlength="${minPw()}" required /><span class="muted small">At least ${minPw()} characters.</span></div>
         </div>
         ${META.captcha?.register ? '<div class="captcha-box" id="regCaptcha"></div>' : ''}
         <button class="btn btn-primary btn-block" id="regBtn">Create account</button>
@@ -1822,6 +1889,7 @@ async function pageAdmin(tab, sub, params) {
       ${captchaSettingsHtml(settings)}
       ${mapsSettingsHtml(settings)}
       ${preloaderSettingsHtml(settings)}
+      ${securitySettingsHtml(settings)}
       ${notifSettingsHtml(settings)}
       <div class="form-card" style="max-width:620px;margin-top:20px">
         <h3>Your administrator account</h3>
@@ -1840,6 +1908,7 @@ async function pageAdmin(tab, sub, params) {
     bindMapsSettings();
     bindCaptchaSettings();
     bindPreloaderSettings(settings);
+    bindSecuritySettings(settings);
     return;
   }
 
@@ -2000,11 +2069,13 @@ async function adminUserDetail(id) {
         </div>
         <div class="row"><div class="field"><label>Mobile number</label><input name="phone" type="tel" value="${esc(u.phone || '')}" placeholder="242-555-1234" /></div><div></div></div>
         <div class="row">
-          <div class="field"><label>Set new password</label><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="Leave blank to keep current" /></div>
+          <div class="field"><label>Set new password</label><input name="password" type="password" minlength="${minPw()}" autocomplete="new-password" placeholder="Leave blank to keep current" /></div>
           <div class="field"><label>Status</label><select name="suspended" ${self ? 'disabled' : ''}><option value="0" ${!u.suspended ? 'selected' : ''}>Active</option><option value="1" ${u.suspended ? 'selected' : ''}>Suspended (can't log in)</option></select></div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-primary">Save changes</button>
+          ${u.suspended ? '' : '<button type="button" class="btn btn-ghost" id="sendReset">📧 Send password reset link</button>'}
+          <button type="button" class="btn btn-ghost" id="kickUser">🚪 ${self ? 'Log out my other devices' : 'Log out of all devices'}</button>
           ${self ? '' : '<button type="button" class="btn btn-danger" id="delUser">Delete account</button>'}
         </div>
       </form>
@@ -2025,6 +2096,17 @@ async function adminUserDetail(id) {
       if (self) { me = { ...me, ...r.user }; renderNav(); }
       toast('Account updated'); adminUserDetail(id);
     } catch (err) { showErr('uErr', err.message); }
+  };
+  const sr = document.getElementById('sendReset');
+  if (sr) sr.onclick = async () => {
+    if (!confirm(`Email ${u.name} a link to choose a new password?`)) return;
+    try { const r = await api('/api/admin/users/' + u.id + '/send-reset', { method: 'POST' }); toast(`Reset link sent to ${r.email}${r.valid ? ` (works for ${r.valid})` : ''}`); }
+    catch (err) { toast(err.message, true); }
+  };
+  document.getElementById('kickUser').onclick = async () => {
+    if (!confirm(self ? 'Log out your account on every other device?' : `Log ${u.name} out on every device?`)) return;
+    try { await api('/api/admin/users/' + u.id + '/logout', { method: 'POST' }); toast(self ? 'Your other devices are logged out' : `${u.name} is logged out everywhere`); }
+    catch (err) { toast(err.message, true); }
   };
   const del = document.getElementById('delUser');
   if (del) del.onclick = async () => {
@@ -2047,7 +2129,7 @@ function adminNewUser() {
         <div class="row"><div class="field"><label>Account type</label>${roleSelect('user')}</div>
         <div class="field"><label>Organizer name <span class="muted small">(organizer accounts)</span></label><input name="organization" /></div></div>
         <div class="field"><label>Mobile number (optional)</label><input name="phone" type="tel" placeholder="242-555-1234" /></div>
-        <div class="field"><label>Temporary password</label><input name="password" type="password" minlength="8" required autocomplete="new-password" /></div>
+        <div class="field"><label>Temporary password</label><input name="password" type="password" minlength="${minPw()}" required autocomplete="new-password" /></div>
         <button class="btn btn-primary">Create account</button>
       </form>
     </div>`);
@@ -2141,6 +2223,108 @@ function bindMapsSettings() {
     e.target.disabled = false; e.target.textContent = '📍 Locate events missing a map pin';
   };
 }
+
+// ---------- log in & security settings (admin) ----------
+const HOURS_LIST = [[1, '1 hour'], [4, '4 hours'], [8, '8 hours'], [12, '12 hours'], [24, '1 day'], [72, '3 days'], [168, '1 week'], [336, '2 weeks'], [720, '30 days'], [2160, '90 days']];
+const IDLE_LIST = [[0, 'Never (off)'], [5, '5 minutes'], [10, '10 minutes'], [15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [240, '4 hours']];
+const TRIES_LIST = [[0, 'Off (no limit)'], [3, '3 wrong tries'], [5, '5 wrong tries'], [10, '10 wrong tries']];
+const LOCK_LIST = [[5, '5 minutes'], [15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [1440, '1 day']];
+const RESET_LIST = [[15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [1440, '1 day']];
+const PWLEN_LIST = [[8, '8 characters'], [10, '10 characters'], [12, '12 characters'], [16, '16 characters']];
+function securitySettingsHtml(settings) {
+  const s = settings.security;
+  const opt = (list, v) => { const l = list.some(([k]) => k === v) ? list : [...list, [v, String(v)]]; return l.map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${t}</option>`).join(''); };
+  const wp = !!window.TJ_CONFIG;
+  return `
+  <div class="form-card" style="max-width:820px;margin-top:20px">
+    <h3>🔐 Log in & security</h3>
+    <p class="muted small">Control how long people stay logged in, when they're logged out automatically, and how passwords are reset.${wp ? ' New time limits apply the next time someone logs in.' : ''}</p>
+    ${errBox('secErr')}
+    <form id="secForm">
+      <h4 class="sec-sub">⏱️ Log-in timer</h4>
+      <div class="row">
+        <div class="field"><label>Keep people logged in for</label><select name="sessionHours">${opt(HOURS_LIST, s.sessionHours)}</select><span class="muted small">Attendees and organizers. After this they must log in again.</span></div>
+        <div class="field"><label>Keep administrators logged in for</label><select name="adminSessionHours">${opt(HOURS_LIST, s.adminSessionHours)}</select><span class="muted small">A shorter time keeps the Admin Panel safer.</span></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Log out automatically after no activity</label><select name="idleMinutes">${opt(IDLE_LIST, s.idleMinutes)}</select><span class="muted small">A 1-minute warning shows first, so people can stay logged in.</span></div>
+        <div></div>
+      </div>
+      <h4 class="sec-sub">🚫 Wrong passwords</h4>
+      <div class="row">
+        <div class="field"><label>Lock the log-in after</label><select name="maxAttempts">${opt(TRIES_LIST, s.maxAttempts)}</select></div>
+        <div class="field"><label>Lock it for</label><select name="lockMinutes">${opt(LOCK_LIST, s.lockMinutes)}</select><span class="muted small">Stops people guessing passwords.</span></div>
+      </div>
+      <h4 class="sec-sub">🔑 Passwords</h4>
+      <label class="check"><input type="checkbox" name="allowReset" ${s.allowReset ? 'checked' : ''} /> Show "Forgot your password?" so people can reset it by email</label>
+      <div class="row" style="margin-top:10px">
+        <div class="field"><label>Reset link works for</label><select name="resetMinutes">${opt(RESET_LIST, s.resetMinutes)}</select></div>
+        <div class="field"><label>Shortest password allowed</label><select name="minPassword">${opt(PWLEN_LIST, s.minPassword)}</select><span class="muted small">For new accounts and password changes.</span></div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary">Save log-in settings</button>
+        <button type="button" class="btn btn-danger" id="kickAll">🚪 Log everyone else out now</button>
+      </div>
+      <p class="muted small" style="margin-top:10px">To reset one person's password, open <a href="#/admin/users">Users</a>, pick the person and use <strong>Send password reset link</strong> or <strong>Set new password</strong>.</p>
+    </form>
+  </div>`;
+}
+function bindSecuritySettings() {
+  const f = document.getElementById('secForm');
+  if (!f) return;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const n = (k) => Number(f.elements.namedItem(k).value);
+    const body = { sessionHours: n('sessionHours'), adminSessionHours: n('adminSessionHours'), idleMinutes: n('idleMinutes'), maxAttempts: n('maxAttempts'), lockMinutes: n('lockMinutes'), resetMinutes: n('resetMinutes'), minPassword: n('minPassword'), allowReset: f.elements.namedItem('allowReset').checked };
+    try {
+      const r = await api('/api/admin/security', { method: 'PUT', body });
+      const s = r.settings.security;
+      META.security = { idleMinutes: s.idleMinutes, allowReset: s.allowReset, minPassword: s.minPassword };
+      toast('Log-in settings saved');
+    } catch (err) { showErr('secErr', err.message); }
+  };
+  document.getElementById('kickAll').onclick = async () => {
+    if (!confirm('Log out everyone on every device, except you on this one? They will need to log in again.')) return;
+    try { const r = await api('/api/admin/logout-everyone', { method: 'POST' }); toast(r.count ? `Logged out ${r.count} ${r.count === 1 ? 'person' : 'people'}` : 'Everyone else is logged out'); }
+    catch (err) { toast(err.message, true); }
+  };
+}
+
+// ---------- automatic log-out after no activity ----------
+(function idleLogout() {
+  const KEY = 'tj_last_active';
+  let last = Date.now(), wrote = 0, warned = false;
+  const shared = () => { try { return Number(localStorage.getItem(KEY)) || 0; } catch { return 0; } };
+  const hideWarn = () => { warned = false; const w = document.getElementById('idleWarn'); if (w) w.remove(); };
+  const bump = () => {
+    last = Date.now();
+    if (last - wrote > 5000) { wrote = last; try { localStorage.setItem(KEY, String(last)); } catch {} }
+    if (warned) hideWarn();
+  };
+  ['pointerdown', 'keydown', 'scroll', 'touchstart', 'mousemove', 'wheel'].forEach((ev) => window.addEventListener(ev, bump, { passive: true, capture: true }));
+  setInterval(async () => {
+    const mins = META.security && META.security.idleMinutes;
+    if (!me || !mins) { if (warned) hideWarn(); return; }
+    const left = mins * 60000 - (Date.now() - Math.max(last, shared()));
+    if (left <= 0) {
+      hideWarn();
+      try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
+      me = null; renderNav();
+      const back = location.hash && !/^#\/(login|reset|forgot)/.test(location.hash) ? '&next=' + encodeURIComponent(tjCurrentRoute()) : '';
+      go('#/login?reason=idle' + back);
+      if (window.TJ_CONFIG && typeof tjRouteUrl === 'function') location.href = tjRouteUrl('#/login?reason=idle' + back);
+      return;
+    }
+    if (left <= 60000 && !warned) {
+      warned = true;
+      const w = document.createElement('div');
+      w.id = 'idleWarn'; w.className = 'tj-root idle-warn'; w.setAttribute('role', 'alertdialog');
+      w.innerHTML = '<div class="idle-box"><strong>⏳ Still there?</strong><span>You\'ll be logged out in 1 minute because there has been no activity.</span><button type="button" class="btn btn-primary btn-sm">Stay logged in</button></div>';
+      w.querySelector('button').onclick = () => { bump(); api('/api/auth/me').catch(() => {}); };
+      document.body.appendChild(w);
+    }
+  }, 5000);
+})();
 
 // ---------- preloader settings (admin) ----------
 const PRE_ICON_LIST = [['logo', 'TicketJunkies'], ['ticket', 'Ticket'], ['vinyl', 'Vinyl record'], ['ring', 'Ring'], ['music', 'Music'], ['star', 'Star'], ['bolt', 'Lightning'], ['heart', 'Heart']];
@@ -2887,7 +3071,7 @@ window.addEventListener('elementor/frontend/init', () => {
 (function () {
   const add = () => {
     const f = document.getElementById('loginForm');
-    if (!f || f.dataset.tjLost || !(window.TJ_CONFIG && TJ_CONFIG.lostPassword)) return;
+    if (!f || f.dataset.tjLost || f.querySelector('.forgot-link') || !(window.TJ_CONFIG && TJ_CONFIG.lostPassword)) return;
     f.dataset.tjLost = '1';
     const p = document.createElement('p');
     p.className = 'muted small';

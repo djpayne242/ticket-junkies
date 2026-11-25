@@ -160,7 +160,7 @@ window.addEventListener('elementor/frontend/init', () => {
 (function () {
   const add = () => {
     const f = document.getElementById('loginForm');
-    if (!f || f.dataset.tjLost || !(window.TJ_CONFIG && TJ_CONFIG.lostPassword)) return;
+    if (!f || f.dataset.tjLost || f.querySelector('.forgot-link') || !(window.TJ_CONFIG && TJ_CONFIG.lostPassword)) return;
     f.dataset.tjLost = '1';
     const p = document.createElement('p');
     p.className = 'muted small';

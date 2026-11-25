@@ -20,6 +20,7 @@ class TJ_Rest {
   public static function init() {
     add_action('rest_api_init', array(__CLASS__, 'register_routes'));
     add_action('init', array(__CLASS__, 'on_init'), 20);
+    self::security_hooks();
     add_filter('query_vars', function ($v) { $v[] = 'tj_share'; return $v; });
     add_action('template_redirect', array(__CLASS__, 'share_redirect'), 1);
     // Suspended accounts can't log in anywhere (wp-login.php included).
@@ -146,6 +147,10 @@ class TJ_Rest {
     self::route('PUT', '/admin/captcha', 'r_admin_captcha');
     self::route('PUT', '/admin/maps', 'r_admin_maps');
     self::route('PUT', '/admin/preloader', 'r_admin_preloader');
+    self::route('PUT', '/admin/security', 'r_admin_security');
+    self::route('POST', '/admin/logout-everyone', 'r_admin_logout_everyone');
+    self::route('POST', '/admin/users/:id/send-reset', 'r_admin_user_send_reset');
+    self::route('POST', '/admin/users/:id/logout', 'r_admin_user_logout');
     self::route('POST', '/admin/maps/locate-all', 'r_admin_locate_all');
     self::route('PUT', '/admin/notifications', 'r_admin_notifications_put');
     self::route('POST', '/admin/notifications/test', 'r_admin_notifications_test');
@@ -662,6 +667,7 @@ class TJ_Rest {
       'maps' => array('googleMapsKey' => $m['googleMapsKey'], 'center' => array('lat' => $m['weatherLat'], 'lng' => $m['weatherLng'])),
       'captcha' => self::captcha_public(),
       'preloader' => $s['preloader'],
+      'security' => array('idleMinutes' => (int) $s['security']['idleMinutes'], 'allowReset' => (bool) $s['security']['allowReset'], 'minPassword' => (int) $s['security']['minPassword']),
       'weatherPlace' => array('name' => $m['weatherPlace'], 'lat' => $m['weatherLat'], 'lng' => $m['weatherLng']),
     );
   }
@@ -691,7 +697,7 @@ class TJ_Rest {
     $email = strtolower(self::str(self::g($b, 'email'), 'Email', 160, true));
     if (!self::valid_email($email) || !is_email($email)) self::fail(400, 'Enter a valid email address');
     $password = is_string(self::g($b, 'password')) ? $b['password'] : '';
-    if (strlen($password) < 8) self::fail(400, 'Password must be at least 8 characters');
+    self::check_password($password);
     $role = in_array(self::g($b, 'role'), array('organizer', 'promoter'), true) ? 'organizer' : 'user';
     $organization = self::str(self::g($b, 'organization'), 'Organizer name', 100, $role === 'organizer');
     if (TJ_Store::user_by_email($email) || email_exists($email)) self::fail(409, 'An account with this email already exists');
@@ -716,7 +722,28 @@ class TJ_Rest {
     $wpu = $user ? get_userdata($user['id']) : null;
     $pw = self::g($b, 'password');
     $pw = is_string($pw) || is_numeric($pw) ? (string) $pw : '';
-    if (!$wpu || $pw === '' || !wp_check_password($pw, $wpu->user_pass, $wpu->ID)) self::fail(401, 'Incorrect email or password');
+    $sec = self::settings()['security'];
+    $lk = 'tj_lf_' . md5($email);
+    $lf = get_transient($lk);
+    $lock_msg = function ($until) use ($sec) { return 'Too many wrong tries. Please wait ' . max(1, (int) ceil(($until - time()) / 60)) . ' minute(s) and try again' . (!empty($sec['allowReset']) ? ', or reset your password' : '') . '.'; };
+    if (!empty($sec['maxAttempts']) && is_array($lf) && !empty($lf['until']) && $lf['until'] > time()) self::fail(429, $lock_msg($lf['until']));
+    if (!$wpu || $pw === '' || !wp_check_password($pw, $wpu->user_pass, $wpu->ID)) {
+      $max = (int) $sec['maxAttempts'];
+      if ($max > 0) {
+        $lf = is_array($lf) && empty($lf['until']) ? $lf : array('count' => 0, 'until' => 0);
+        $lf['count']++;
+        if ($lf['count'] >= $max) {
+          $lf['until'] = time() + (int) $sec['lockMinutes'] * 60;
+          set_transient($lk, $lf, (int) $sec['lockMinutes'] * 60);
+          self::fail(429, $lock_msg($lf['until']));
+        }
+        set_transient($lk, $lf, DAY_IN_SECONDS);
+        $left = $max - $lf['count'];
+        if ($left <= 2) self::fail(401, 'Incorrect email or password (' . $left . ($left === 1 ? ' try' : ' tries') . ' left)');
+      }
+      self::fail(401, 'Incorrect email or password');
+    }
+    delete_transient($lk);
     if ($user['suspended']) self::fail(403, 'This account has been suspended. Please contact support.');
     self::capture_cookie();
     $signed = wp_signon(array('user_login' => $wpu->user_login, 'user_password' => $pw, 'remember' => true), is_ssl());
@@ -1326,7 +1353,7 @@ class TJ_Rest {
     if (!self::valid_email($email) || !is_email($email)) self::fail(400, 'Enter a valid email address');
     if (TJ_Store::user_by_email($email) || email_exists($email)) self::fail(409, 'An account with this email already exists');
     $password = is_scalar(self::g($b, 'password')) ? (string) $b['password'] : '';
-    if (strlen($password) < 8) self::fail(400, 'Password must be at least 8 characters');
+    self::check_password($password);
     $role = in_array(self::g($b, 'role'), array('user', 'organizer', 'admin'), true) ? $b['role'] : 'user';
     $organization = self::str(self::g($b, 'organization'), 'Organizer name', 100);
     $phone = TJ_Notify::normalize_phone(self::g($b, 'phone'));
@@ -1357,7 +1384,7 @@ class TJ_Rest {
     if ($self && $next['suspended']) self::fail(400, "You can't suspend your own account");
     if ($u['role'] === 'admin' && ($next['role'] !== 'admin' || $next['suspended']) && count(TJ_Notify::active_admins()) <= 1) self::fail(400, 'At least one active administrator is required');
     $pw = self::g($b, 'password');
-    if ($pw && strlen((string) $pw) < 8) self::fail(400, 'New password must be at least 8 characters');
+    if ($pw) self::check_password((string) $pw, 'New password');
 
     add_filter('send_email_change_email', '__return_false');
     add_filter('send_password_change_email', '__return_false');
@@ -1613,7 +1640,7 @@ class TJ_Rest {
     $cap = $s['captcha'];
     $cap['secretKey'] = !empty($cap['secretKey']) ? '••••' . substr($cap['secretKey'], -4) : '';
     $cap['testKeys'] = $s['captcha']['siteKey'] === TJ_Store::RECAPTCHA_TEST_SITE;
-    return array('feePercent' => $s['feePercent'], 'feeFixed' => $s['feeFixed'], 'notifications' => $n, 'maps' => $s['maps'], 'preloader' => $s['preloader'], 'captcha' => $cap,
+    return array('feePercent' => $s['feePercent'], 'feeFixed' => $s['feeFixed'], 'notifications' => $n, 'maps' => $s['maps'], 'preloader' => $s['preloader'], 'security' => $s['security'], 'captcha' => $cap,
       'defaultAdminRecipients' => array_map(function ($u) { return $u['email']; }, TJ_Notify::active_admins()));
   }
   public static function r_admin_settings($c) { self::require_admin(); return array('settings' => self::settings_view()); }
@@ -1681,6 +1708,101 @@ class TJ_Rest {
     $s['maps'] = $m;
     TJ_Store::save_settings($s);
     return array('settings' => self::settings_view());
+  }
+
+  // ---------- log in & security ----------
+  private static $admin_reset = false;
+  public static function security_hooks() {
+    // How long people stay logged in (admins can have a shorter time)
+    add_filter('auth_cookie_expiration', function ($len, $uid) {
+      $s = TJ_Store::settings()['security'];
+      $u = TJ_Store::user_by_id($uid);
+      $h = ($u && $u['role'] === 'admin') ? $s['adminSessionHours'] : $s['sessionHours'];
+      return max(3600, (int) $h * 3600);
+    }, 20, 2);
+    add_filter('allow_password_reset', function ($allow) {
+      if (self::$admin_reset) return $allow;
+      $s = TJ_Store::settings()['security'];
+      return empty($s['allowReset']) ? new WP_Error('no_password_reset', 'Password resets are turned off. Please contact support.') : $allow;
+    }, 20);
+    add_filter('password_reset_expiration', function () { return max(600, (int) TJ_Store::settings()['security']['resetMinutes'] * 60); });
+    add_action('wp_login', function ($login, $user) { update_user_meta($user->ID, 'tj_last_seen', time()); }, 10, 2);
+    // Log out after no activity
+    add_action('init', function () {
+      if (!is_user_logged_in() || wp_doing_cron()) return;
+      $uid = get_current_user_id();
+      $min = (int) TJ_Store::settings()['security']['idleMinutes'];
+      $now = time();
+      $last = (int) get_user_meta($uid, 'tj_last_seen', true);
+      if ($min > 0 && $last && $now - $last > $min * 60) {
+        wp_logout();
+        wp_set_current_user(0);
+        return;
+      }
+      if (!$last || $now - $last > 60) update_user_meta($uid, 'tj_last_seen', $now);
+    }, 1);
+  }
+  public static function check_password($pw, $label = 'Password') {
+    $n = (int) self::settings()['security']['minPassword'];
+    if (strlen((string) $pw) < $n) self::fail(400, $label . ' must be at least ' . $n . ' characters');
+    if (strlen((string) $pw) > 200) self::fail(400, $label . ' is too long');
+  }
+  public static function r_admin_security($c) {
+    self::require_admin();
+    $b = $c['body'];
+    $s = self::settings();
+    $sec = $s['security'];
+    $rules = array(
+      'sessionHours' => array(1, 2160, 'Pick how long people stay logged in'), 'adminSessionHours' => array(1, 2160, 'Pick how long administrators stay logged in'),
+      'idleMinutes' => array(0, 1440, 'Pick an inactivity time'), 'maxAttempts' => array(0, 20, 'Wrong tries must be between 0 (off) and 20'),
+      'lockMinutes' => array(1, 1440, 'Lock time must be between 1 minute and 1 day'), 'resetMinutes' => array(10, 1440, 'Reset links must work for between 10 minutes and 1 day'),
+      'minPassword' => array(8, 64, 'Minimum password length must be between 8 and 64'),
+    );
+    foreach ($rules as $k => $r) {
+      if (!self::has($b, $k)) continue;
+      $n = self::numk($b, $k);
+      if (!self::finite($n) || floor($n) != $n || $n < $r[0] || $n > $r[1]) self::fail(400, $r[2]);
+      $sec[$k] = (int) $n;
+    }
+    if (self::has($b, 'allowReset')) $sec['allowReset'] = (bool) $b['allowReset'];
+    $s['security'] = $sec;
+    TJ_Store::save_settings($s);
+    return array('settings' => self::settings_view());
+  }
+  public static function r_admin_logout_everyone($c) {
+    $admin = self::require_admin();
+    $mine = wp_get_session_token();
+    $n = 0;
+    foreach (get_users(array('fields' => 'ID')) as $id) {
+      $m = WP_Session_Tokens::get_instance((int) $id);
+      if ((int) $id === (int) $admin['id']) { if ($mine) $m->destroy_others($mine); continue; }
+      if (count($m->get_all())) $n++;
+      $m->destroy_all();
+    }
+    return array('ok' => true, 'count' => $n);
+  }
+  public static function r_admin_user_send_reset($c) {
+    self::require_admin();
+    $u = TJ_Store::user_by_id((int) $c['params']['id']);
+    if (!$u) self::fail(404, 'User not found');
+    if ($u['suspended']) self::fail(400, 'This account is suspended. Make it active first.');
+    $wpu = get_userdata($u['id']);
+    if (!function_exists('retrieve_password')) self::fail(500, 'Please update WordPress to send reset links');
+    self::$admin_reset = true;
+    $r = retrieve_password($wpu->user_login);
+    self::$admin_reset = false;
+    if (is_wp_error($r)) self::fail(500, 'The reset email could not be sent: ' . wp_strip_all_tags($r->get_error_message()));
+    $min = (int) self::settings()['security']['resetMinutes'];
+    $valid = $min % 1440 === 0 ? ($min / 1440) . ' day' . ($min === 1440 ? '' : 's') : ($min % 60 === 0 ? ($min / 60) . ' hour' . ($min === 60 ? '' : 's') : $min . ' minutes');
+    return array('ok' => true, 'email' => $u['email'], 'valid' => $valid);
+  }
+  public static function r_admin_user_logout($c) {
+    $admin = self::require_admin();
+    $u = TJ_Store::user_by_id((int) $c['params']['id']);
+    if (!$u) self::fail(404, 'User not found');
+    $self = (int) $u['id'] === (int) $admin['id'];
+    self::kill_sessions($u['id'], $self ? wp_get_session_token() : null);
+    return array('ok' => true);
   }
 
   // ---------- preloader ----------
