@@ -252,10 +252,20 @@ function publicEvent(ev, viewer) {
     isOwner: !!viewer && (viewer.id === ev.organizerId || viewer.role === 'admin'),
     // Private ticket types (comps, guest list, staff…) are only visible to the event's organizer and admins.
     tiers: ev.tiers.filter((t) => t.visibility !== 'private' || (!!viewer && (viewer.id === ev.organizerId || viewer.role === 'admin')))
-      .map((t) => ({ id: t.id, name: t.name, description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public', price: t.price, remaining: Math.max(0, t.quantity - t.sold), fee: ticketFee(t.price) })),
+      .map((t) => ({ id: t.id, name: t.name, description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public', kind: tierKind(t), price: t.price, suggested: t.suggested ?? null, remaining: Math.max(0, t.quantity - t.sold), fee: ticketFee(t.price) })),
   };
 }
 const isPublicTier = (t) => t.visibility !== 'private';
+const TICKET_KINDS = ['paid', 'free', 'donation'];
+// Older ticket types have no kind: $0 = free, anything else = paid
+function tierKind(t) { return TICKET_KINDS.includes(t.kind) ? t.kind : (t.price > 0 ? 'paid' : 'free'); }
+// Lowest open public price, for "From $X" labels
+function lowestPrice(tiers) {
+  const open = tiers.filter((t) => t.visibility !== 'private' && t.quantity - t.sold > 0);
+  if (!open.length) return { priceFrom: null, priceKind: null, soldOut: true };
+  const best = open.reduce((a, t) => (t.price < a.price || (t.price === a.price && tierKind(t) === 'paid') ? t : a), open[0]);
+  return { priceFrom: best.price, priceKind: tierKind(best), soldOut: false };
+}
 
 function cleanImageUrl(v) {
   const s = str(v, { name: 'Image URL', max: 500 });
@@ -335,16 +345,25 @@ function validateEvent(b, existing) {
   const oldTiers = existing ? existing.tiers : [];
   const tiers = b.tiers.map((t, i) => {
     const name = str(t.name, { name: `Ticket type #${i + 1} name`, max: 60, required: true });
-    const price = round2(Number(t.price));
-    if (!Number.isFinite(price) || price < 0 || price > 10000) fail(400, `Price for "${name}" must be between 0 and 10,000`);
+    // Paid = fixed price · Free = $0 · Donation = buyer chooses the amount (price is the minimum)
+    const kind = TICKET_KINDS.includes(t.kind) ? t.kind : (Number(t.price) > 0 ? 'paid' : 'free');
+    const price = kind === 'free' ? 0 : round2(Number(t.price || 0));
+    if (!Number.isFinite(price) || price < 0 || price > 10000) fail(400, `${kind === 'donation' ? 'Minimum donation' : 'Price'} for "${name}" must be between 0 and 10,000`);
+    if (kind === 'paid' && price <= 0) fail(400, `"${name}" is a paid ticket, so it needs a price above $0. Choose "Free" for free tickets.`);
+    let suggested = null;
+    if (kind === 'donation' && t.suggested !== undefined && t.suggested !== null && String(t.suggested).trim() !== '') {
+      suggested = round2(Number(t.suggested));
+      if (!Number.isFinite(suggested) || suggested < price || suggested > 10000) fail(400, `Suggested donation for "${name}" must be at least the minimum (${money(price)}) and at most 10,000`);
+    }
     const quantity = Number(t.quantity);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) fail(400, `Quantity for "${name}" must be a whole number from 1 to 100,000`);
     const old = t.id && oldTiers.find((o) => o.id === t.id);
     if (old && quantity < old.sold) fail(400, `"${name}" already sold ${old.sold}; quantity can't be lower`);
-    if (old && old.sold - (old.comped || 0) > 0 && price !== old.price) fail(400, `"${name}" has sales; its price can't change`);
+    if (old && old.sold - (old.comped || 0) > 0 && kind !== tierKind(old)) fail(400, `"${name}" has sales; it can't be changed between paid, free and donation`);
+    if (old && old.sold - (old.comped || 0) > 0 && price !== old.price) fail(400, `"${name}" has sales; its ${kind === 'donation' ? 'minimum donation' : 'price'} can't change`);
     const description = str(t.description, { name: `Description for "${name}"`, max: 300 });
     const visibility = t.visibility === 'private' ? 'private' : 'public';
-    return { id: old ? old.id : newId('tier'), name, description, visibility, price, quantity, sold: old ? old.sold : 0, comped: old ? (old.comped || 0) : 0 };
+    return { id: old ? old.id : newId('tier'), name, description, visibility, kind, price, ...(kind === 'donation' ? { suggested } : {}), quantity, sold: old ? old.sold : 0, comped: old ? (old.comped || 0) : 0 };
   });
   for (const o of oldTiers) {
     if (o.sold > 0 && !tiers.some((t) => t.id === o.id)) fail(400, `"${o.name}" has sales and can't be removed`);
@@ -380,7 +399,9 @@ function eventStats(ev) {
   const sold = ev.tiers.reduce((a, t) => a + t.sold, 0);
   const capacity = ev.tiers.reduce((a, t) => a + t.quantity, 0);
   const comped = ev.tiers.reduce((a, t) => a + (t.comped || 0), 0);
-  const revenue = round2(ev.tiers.reduce((a, t) => a + Math.max(0, t.sold - (t.comped || 0)) * t.price, 0));
+  // donation tickets count what buyers actually gave, not the minimum
+  const donated = (t) => orders.filter((o) => !o.comp).reduce((a, o) => a + o.items.filter((i) => i.tierId === t.id).reduce((x, i) => x + i.price * i.qty, 0), 0);
+  const revenue = round2(ev.tiers.reduce((a, t) => a + (tierKind(t) === 'donation' ? donated(t) : Math.max(0, t.sold - (t.comped || 0)) * t.price), 0));
   const checkedIn = orders.reduce((a, o) => a + o.tickets.filter((t) => t.checkedIn).length, 0);
   return { sold, capacity, comped, paidSold: sold - comped, revenue, orders: orders.filter((o) => !o.comp).length, compOrders: orders.filter((o) => o.comp).length, checkedIn, shareViews: ev.shareViews || 0 };
 }
@@ -821,11 +842,11 @@ route('GET', '/api/calendar', async ({ req, query }) => {
     const days = all.filter((k) => k.startsWith(month));
     if (!days.length) continue;
     const pe = publicEvent(e, viewer);
-    const open = pe.tiers.filter((t) => t.visibility !== 'private' && t.remaining > 0);
+    const lp = lowestPrice(e.tiers);
     events.push({ id: e.id, title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, venue: e.venue || '', city: e.city || '', category: e.category, sessionLabel: e.sessionLabel || '',
       time: siteTimeFmt.format(new Date(e.startsAt)), endTime: siteTimeFmt.format(new Date(e.endsAt)), startDay: all[0], days, ended: new Date(e.endsAt).getTime() < now,
       imageUrl: e.imageUrl || '', summary: shortText(e.description), organizer: pe.organizer,
-      priceFrom: open.length ? Math.min(...open.map((t) => t.price)) : null, soldOut: !open.length });
+      ...lp });
   }
   events.sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
   const hol = await publicHolidays(db.settings.maps?.country || 'Bahamas', Number(month.slice(0, 4)));
@@ -953,7 +974,14 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
     if (!Number.isInteger(qty) || qty < 0 || qty > 10) fail(400, 'You can buy up to 10 of each ticket type');
     const tier = ev.tiers.find((t) => t.id === it.tierId && isPublicTier(t)) || fail(400, 'Unknown ticket type');
     if (tier.quantity - tier.sold < qty) fail(409, `Only ${tier.quantity - tier.sold} "${tier.name}" tickets left`);
-    lines.push({ tier, qty });
+    // Donation tickets: the buyer picks the amount (per ticket), at least the organizer's minimum
+    let unit = tierKind(tier) === 'free' ? 0 : tier.price;
+    if (tierKind(tier) === 'donation') {
+      unit = round2(Number(it.amount));
+      if (!Number.isFinite(unit) || unit < tier.price) fail(400, `Enter a donation of at least ${money(tier.price)} for "${tier.name}"`);
+      if (unit > 10000) fail(400, `Donations are limited to ${money(10000)} per ticket`);
+    }
+    lines.push({ tier, qty, unit });
   }
   if (!lines.length) fail(400, 'Select at least one ticket');
 
@@ -967,8 +995,8 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
   const buyerPhone = normalizePhone(body.buyerPhone);
   if (!buyerPhone) fail(400, 'Enter a valid mobile number so we can text your tickets');
 
-  const subtotal = round2(lines.reduce((a, l) => a + l.tier.price * l.qty, 0));
-  const fees = round2(lines.reduce((a, l) => a + ticketFee(l.tier.price) * l.qty, 0));
+  const subtotal = round2(lines.reduce((a, l) => a + l.unit * l.qty, 0));
+  const fees = round2(lines.reduce((a, l) => a + ticketFee(l.unit) * l.qty, 0));
   const total = round2(subtotal + fees);
 
   // DEMO PAYMENT: validates card format only. Replace with Stripe/PayPal before going live.
@@ -992,12 +1020,12 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
   for (const l of lines) {
     l.tier.sold += l.qty;
     for (let i = 0; i < l.qty; i++) {
-      tickets.push({ code: 'TJ-' + crypto.randomBytes(4).toString('hex').toUpperCase(), tierId: l.tier.id, tierName: l.tier.name, price: l.tier.price, checkedIn: false });
+      tickets.push({ code: 'TJ-' + crypto.randomBytes(4).toString('hex').toUpperCase(), tierId: l.tier.id, tierName: l.tier.name, price: l.unit, checkedIn: false });
     }
   }
   const order = {
     id: newId('ord'), userId: user.id, eventId: ev.id,
-    items: lines.map((l) => ({ tierId: l.tier.id, tierName: l.tier.name, price: l.tier.price, qty: l.qty })),
+    items: lines.map((l) => ({ tierId: l.tier.id, tierName: l.tier.name, price: l.unit, qty: l.qty, ...(tierKind(l.tier) === 'donation' ? { donation: true } : {}) })),
     tickets, buyerName, buyerFirstName, buyerLastName, buyerEmail, buyerPhone, subtotal, fees, total, ...card, status: 'paid',
     key: crypto.randomBytes(12).toString('hex'), createdAt: new Date().toISOString(),
   };
@@ -1657,7 +1685,7 @@ function buildReport({ events, query, withCards }) {
         const items = p.flatMap((o) => o.items.filter((i) => i.tierId === t.id));
         const q = items.reduce((a, i) => a + i.qty, 0);
         const c = pc.flatMap((o) => o.items.filter((i) => i.tierId === t.id)).reduce((a, i) => a + i.qty, 0);
-        return { name: t.name + (t.visibility === 'private' ? ' (private)' : ''), price: t.price, quantity: t.quantity, sold: q, comps: c, revenue: round2(q * t.price) };
+        return { name: t.name + (t.visibility === 'private' ? ' (private)' : '') + (tierKind(t) === 'donation' ? ' (donation)' : ''), price: t.price, quantity: t.quantity, sold: q, comps: c, revenue: round2(items.reduce((a, i) => a + i.price * i.qty, 0)) };
       }),
     };
   }).filter((r) => eventId || r.orders || r.comps || r.refunds || r.soldAllTime || evById[r.id].status === 'published');

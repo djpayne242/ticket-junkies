@@ -109,12 +109,55 @@ function cover(ev, cls = '') {
   const [a, b, icon] = CAT_STYLE[ev.category] || ['#376eb8', '#84d65f', '🎟️'];
   return `<div class="cover ${cls}" style="background:linear-gradient(135deg,${a},${b})"><span class="cover-icon">${icon}</span><span class="cover-title">${esc(ev.title)}</span></div>`;
 }
-function priceFrom(ev) {
-  const open = ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private');
-  if (!open.length) return '<span class="badge soldout">Sold out</span>';
-  const min = Math.min(...open.map((t) => t.price));
-  return min === 0 ? 'Free' : `From ${money(min)}`;
+const tierKindOf = (t) => t.kind || (t.price > 0 ? 'paid' : 'free');
+// "From $25" / "Free" / "Donation · from $5" / "Pay what you want" — plain text, or null when sold out
+function priceText(kind, min, many = true) {
+  if (kind === null || kind === undefined) return null;
+  if (kind === 'donation') return min > 0 ? `Donation · from ${money(min)}` : 'Pay what you want';
+  if (kind === 'free' || min === 0) return 'Free';
+  return many ? `From ${money(min)}` : money(min);
 }
+function lowestTier(ev) {
+  const open = ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private');
+  if (!open.length) return null;
+  return open.reduce((a, t) => (t.price < a.price || (t.price === a.price && tierKindOf(t) === 'paid') ? t : a), open[0]);
+}
+function priceFrom(ev) {
+  const t = lowestTier(ev);
+  if (!t) return '<span class="badge soldout">Sold out</span>';
+  return esc(priceText(tierKindOf(t), t.price, ev.tiers.filter((x) => x.visibility !== 'private').length > 1));
+}
+
+// ---------- countdown to the start of each event (updates every second) ----------
+function cdParts(ms) { const s = Math.max(0, Math.floor(ms / 1000)); return { d: Math.floor(s / 86400), h: Math.floor((s % 86400) / 3600), m: Math.floor((s % 3600) / 60), s: s % 60 }; }
+const p2 = (n) => String(n).padStart(2, '0');
+function countdownState(startsAt, endsAt) {
+  const now = Date.now(), st = new Date(startsAt).getTime(), en = new Date(endsAt).getTime();
+  return now < st ? 'soon' : now < en ? 'live' : 'ended';
+}
+function countdownHtml(ev, big = false) {
+  const attrs = `data-cd="${esc(ev.startsAt)}" data-cd-end="${esc(ev.endsAt)}"`;
+  if (big) return `<div class="cd-big" ${attrs} aria-live="off"><div class="cd-big-label">⏳ Event starts in</div><div class="cd-big-boxes">${['Days', 'Hours', 'Minutes', 'Seconds'].map((l, i) => `<div class="cd-box"><b data-cd-u="${i}">--</b><span>${l}</span></div>`).join('')}</div><div class="cd-big-msg"></div></div>`;
+  return `<span class="cd-chip" ${attrs}>⏳ <span class="cd-txt">…</span></span>`;
+}
+function tickCountdowns() {
+  document.querySelectorAll('[data-cd]').forEach((el) => {
+    const state = countdownState(el.dataset.cd, el.dataset.cdEnd);
+    if (el.dataset.cdState !== state) { el.dataset.cdState = state; el.classList.toggle('is-live', state === 'live'); el.classList.toggle('is-ended', state === 'ended'); }
+    const c = cdParts(new Date(el.dataset.cd).getTime() - Date.now());
+    if (el.classList.contains('cd-big')) {
+      const msg = el.querySelector('.cd-big-msg'), boxes = el.querySelector('.cd-big-boxes'), lbl = el.querySelector('.cd-big-label');
+      if (state !== 'soon') { boxes.style.display = 'none'; lbl.style.display = 'none'; msg.textContent = state === 'live' ? '🔴 Happening now!' : 'This event has ended'; return; }
+      [c.d, p2(c.h), p2(c.m), p2(c.s)].forEach((v, i) => { const b = el.querySelector(`[data-cd-u="${i}"]`); if (b && b.textContent !== String(v)) b.textContent = v; });
+      return;
+    }
+    const t = el.querySelector('.cd-txt') || el;
+    t.textContent = state === 'live' ? 'Happening now' : state === 'ended' ? 'Ended' : `Starts in ${c.d ? c.d + 'd ' : ''}${p2(c.h)}h ${p2(c.m)}m ${p2(c.s)}s`;
+  });
+}
+let cdTimer = null;
+function startCountdowns() { tickCountdowns(); if (!cdTimer) cdTimer = setInterval(() => { if (document.querySelector('[data-cd]')) tickCountdowns(); }, 1000); }
+new MutationObserver(() => { if (document.querySelector('[data-cd]:not([data-cd-state])')) startCountdowns(); }).observe(document.documentElement, { childList: true, subtree: true });
 const card = (ev) => `
   <a class="card" href="#/event/${esc(ev.id)}">
     ${cover(ev)}
@@ -123,7 +166,9 @@ const card = (ev) => `
       <h3>${esc(ev.title)}</h3>
       <div class="muted small">${esc(ev.venue)} · ${esc(ev.city)}${(ev.extraVenues || []).length ? ` <span class="more-dates">+${ev.extraVenues.length} venue${ev.extraVenues.length > 1 ? 's' : ''}</span>` : ''}</div>
       <div class="muted small">By ${esc(ev.organizer)}</div>
-      <div class="card-foot"><span class="price">${priceFrom(ev)}</span><span class="card-foot-r"><span class="tag">${esc(ev.category)}</span><button class="card-share" data-share="${esc(ev.id)}" title="Share this event" aria-label="Share ${esc(ev.title)}">${SHARE_ICON}</button></span></div>
+      <div class="card-cd">${countdownHtml(ev)}</div>
+      <div class="card-buy"><span class="price">${priceFrom(ev)}</span>${lowestTier(ev) ? '<span class="btn btn-primary btn-sm card-get">Get tickets →</span>' : '<span class="btn btn-ghost btn-sm card-get off">View event</span>'}</div>
+      <div class="card-foot"><span class="card-foot-r"><span class="tag">${esc(ev.category)}</span><button class="card-share" data-share="${esc(ev.id)}" title="Share this event" aria-label="Share ${esc(ev.title)}">${SHARE_ICON}</button></span></div>
     </div>
   </a>`;
 
@@ -490,7 +535,7 @@ function calendarHtml(o = {}) {
       <div class="cal-day"></div>
     </div></section>`;
 }
-function calMoney(n) { return n === null || n === undefined ? '' : n === 0 ? 'Free' : 'From $' + Number(n).toFixed(2); }
+function calMoney(n, kind) { return n === null || n === undefined ? '' : priceText(kind || (n > 0 ? 'paid' : 'free'), n); }
 function openCalendarDay(day, evs, hols, routeFix) {
   document.getElementById('calModal')?.remove();
   const label = new Date(day + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
@@ -502,7 +547,7 @@ function openCalendarDay(day, evs, hols, routeFix) {
     const img = e.imageUrl
       ? `<img src="${esc(e.imageUrl)}" alt="${esc(e.title)} flyer" loading="lazy" decoding="async" />`
       : `<div class="cal-pop-noimg" style="background:linear-gradient(135deg,${(CAT_STYLE[e.category] || ['#376eb8', '#84d65f'])[0]},${(CAT_STYLE[e.category] || ['#376eb8', '#84d65f'])[1]})"><span>${(CAT_STYLE[e.category] || [, , '🎟️'])[2]}</span></div>`;
-    const price = e.ended ? '<span class="badge">Ended</span>' : e.soldOut ? '<span class="badge soldout">Sold out</span>' : `<strong class="cal-pop-price">${esc(calMoney(e.priceFrom))}</strong>`;
+    const price = e.ended ? '<span class="badge">Ended</span>' : e.soldOut ? '<span class="badge soldout">Sold out</span>' : `<strong class="cal-pop-price">${esc(calMoney(e.priceFrom, e.priceKind))}</strong>`;
     return `<article class="cal-pop-ev${e.ended ? ' ended' : ''}">
       <a class="cal-pop-flyer" href="${link}">${img}</a>
       <div class="cal-pop-body">
@@ -510,6 +555,7 @@ function openCalendarDay(day, evs, hols, routeFix) {
         <h4><a href="${link}">${esc(e.title)}</a></h4>
         <div class="muted small">📍 ${esc(e.city && !norm(e.venue).includes(norm(e.city)) ? e.venue + ', ' + e.city : e.venue)}</div>
         <div class="muted small">🎤 ${esc(e.organizer || '')} · <span class="tag">${esc(e.category)}</span></div>
+        ${e.ended ? '' : countdownHtml(e)}
         ${e.summary ? `<p class="cal-pop-desc">${esc(e.summary)}</p>` : ''}
         <div class="cal-pop-foot">${price}<a class="btn btn-primary btn-sm" href="${link}">${e.ended ? 'View event' : e.soldOut ? 'View event' : 'Get tickets →'}</a></div>
       </div></article>`;
@@ -633,6 +679,7 @@ async function pageEvent(id) {
         <div class="title-row"><h1 style="font-size:2.3rem">${esc(ev.title)}</h1>${ev.status !== 'draft' ? `<button class="btn btn-primary share-btn" id="shareBtn">${SHARE_ICON} Share</button>` : ''}</div>
         ${ev.status !== 'draft' ? `<div class="quick-share">${quickShareHtml(ev)}</div>` : ''}
         <div class="muted">Presented by <strong>${esc(ev.organizer)}</strong> · <span class="tag">${esc(ev.category)}</span></div>
+        ${ev.status !== 'cancelled' ? countdownHtml(ev, true) : ''}
         <div class="event-meta">
           <div class="meta-row"><div class="meta-ico">📅</div><div>${multiDay(ev)
             ? `<strong>${esc(fmtLong(ev.startsAt))}</strong><div class="muted small">Until ${esc(fmtLong(ev.endsAt))}</div><div class="small"><span class="tag">🗓️ Multi-day event · ${Math.max(2, Math.round((new Date(new Date(ev.endsAt).toDateString()) - new Date(new Date(ev.startsAt).toDateString())) / 86400000) + 1)} days</span> One ticket covers every day.</div>`
@@ -664,10 +711,15 @@ async function pageEvent(id) {
   document.getElementById('toMap').onclick = (e) => { e.preventDefault(); document.getElementById('venue').scrollIntoView({ behavior: 'smooth' }); };
 
   const panel = document.getElementById('buyPanel');
+  // donation tickets: amount per ticket chosen by the buyer (starts at the suggested amount or the minimum)
+  const amt = {};
+  for (const t of ev.tiers) if (tierKindOf(t) === 'donation') amt[t.id] = t.suggested ?? t.price;
+  const unitOf = (t) => (tierKindOf(t) === 'donation' ? Number(amt[t.id]) || 0 : tierKindOf(t) === 'free' ? 0 : t.price);
+  const amtOk = (t) => tierKindOf(t) !== 'donation' || !qty[t.id] || (Number.isFinite(Number(amt[t.id])) && Number(amt[t.id]) >= t.price);
   const totals = () => {
     let subtotal = 0, fees = 0, count = 0;
-    for (const t of ev.tiers) { subtotal += t.price * qty[t.id]; fees += fee(t.price) * qty[t.id]; count += qty[t.id]; }
-    return { subtotal: round2(subtotal), fees: round2(fees), total: round2(subtotal + fees), count };
+    for (const t of ev.tiers) { const u = unitOf(t); subtotal += u * qty[t.id]; fees += fee(u) * qty[t.id]; count += qty[t.id]; }
+    return { subtotal: round2(subtotal), fees: round2(fees), total: round2(subtotal + fees), count, ok: ev.tiers.every(amtOk) };
   };
 
   function renderPicker() {
@@ -682,7 +734,10 @@ async function pageEvent(id) {
       return `<div class="tier">
         <div><div class="tier-name">${esc(t.name)}</div>
           ${t.description ? `<div class="tier-desc">${esc(t.description)}</div>` : ''}
-          <div class="small">${t.price === 0 ? '<strong>Free</strong>' : `<strong>${money(t.price)}</strong> <span class="muted">+ ${money(t.fee)} fee</span>`}</div>
+          <div class="small">${tierKindOf(t) === 'donation'
+            ? `<span class="kind-badge donation">💝 Donation</span> <strong>${t.price > 0 ? 'Minimum ' + money(t.price) : 'Pay what you want'}</strong>${t.suggested ? ` <span class="muted">· suggested ${money(t.suggested)}</span>` : ''}`
+            : tierKindOf(t) === 'free' || t.price === 0 ? '<span class="kind-badge free">🎁 Free</span>' : `<strong>${money(t.price)}</strong> <span class="muted">+ ${money(t.fee)} fee</span>`}</div>
+          ${tierKindOf(t) === 'donation' && qty[t.id] > 0 ? `<label class="don-amt"><span>Your donation per ticket</span><span class="don-in">$<input type="number" inputmode="decimal" min="${t.price}" step="0.01" data-amt="${esc(t.id)}" value="${esc(amt[t.id])}" /></span></label>${amtOk(t) ? '' : `<div class="error small" style="margin:6px 0 0">Minimum is ${money(t.price)}</div>`}` : ''}
           <div class="muted small">${t.remaining > 0 ? (t.remaining <= 20 ? `Only ${t.remaining} left!` : 'Available') : 'Sold out'}</div></div>
         ${t.remaining > 0 && buyable ? `<select data-tier="${esc(t.id)}">${opts}</select>` : '<span class="badge soldout">Sold out</span>'}
       </div>`;
@@ -697,11 +752,15 @@ async function pageEvent(id) {
         <div><span class="muted">Service fees</span><span>${money(tt.fees)}</span></div>
         <div class="total"><span>Total</span><span>${money(tt.total)}</span></div>
       </div>
-      <button class="btn btn-primary btn-block" id="toCheckout" style="margin-top:14px" ${tt.count && buyable ? '' : 'disabled'}>${tt.count ? `Continue to checkout · ${tt.count} ticket${tt.count > 1 ? 's' : ''}` : 'Select tickets'}</button>
+      <button class="btn btn-primary btn-block" id="toCheckout" style="margin-top:14px" ${tt.count && buyable && tt.ok ? '' : 'disabled'}>${tt.count ? `Continue to checkout · ${tt.count} ticket${tt.count > 1 ? 's' : ''}` : 'Select tickets'}</button>
       ${!me ? '<p class="muted small" style="text-align:center;margin:10px 0 0">🔒 You will create a free account (or log in) before checkout, so all your tickets are saved in your dashboard.</p>' : ''}`;
     panel.querySelectorAll('select[data-tier]').forEach((s) => (s.onchange = () => { qty[s.dataset.tier] = Number(s.value); renderPicker(); }));
+    panel.querySelectorAll('input[data-amt]').forEach((inp) => {
+      inp.onchange = () => { amt[inp.dataset.amt] = inp.value === '' ? '' : round2(Number(inp.value)); renderPicker(); };
+      inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); inp.onchange(); } };
+    });
     document.getElementById('toCheckout').onclick = () => {
-      sessionStorage.setItem('tj_cart', JSON.stringify({ id: ev.id, qty }));
+      sessionStorage.setItem('tj_cart', JSON.stringify({ id: ev.id, qty, amt }));
       go('#/checkout/' + ev.id);
     };
   }
@@ -709,7 +768,7 @@ async function pageEvent(id) {
   // restore cart after login redirect
   try {
     const saved = JSON.parse(sessionStorage.getItem('tj_cart') || 'null');
-    if (saved && saved.id === ev.id) for (const t of ev.tiers) qty[t.id] = Math.min(saved.qty[t.id] || 0, t.remaining, 10);
+    if (saved && saved.id === ev.id) for (const t of ev.tiers) { qty[t.id] = Math.min(saved.qty[t.id] || 0, t.remaining, 10); if (saved.amt && saved.amt[t.id] !== undefined && tierKindOf(t) === 'donation') amt[t.id] = saved.amt[t.id]; }
   } catch {}
   renderPicker();
 }
@@ -728,13 +787,15 @@ async function pageCheckout(id) {
   const qty = {};
   for (const t of ev.tiers) if (t.visibility !== 'private') qty[t.id] = saved && saved.id === ev.id ? Math.min(saved.qty[t.id] || 0, t.remaining, 10) : 0;
   const lines = ev.tiers.filter((t) => qty[t.id] > 0);
+  const amt = {};
+  for (const t of lines) amt[t.id] = tierKindOf(t) === 'donation' ? Math.max(t.price, round2(Number(saved?.amt?.[t.id] ?? t.suggested ?? t.price)) || 0) : tierKindOf(t) === 'free' ? 0 : t.price;
   const ended = new Date(ev.endsAt) < new Date();
   if (!lines.length || ev.status !== 'published' || ended) {
     $app.innerHTML = `<div class="empty"><div class="big">🛒</div><h2>${ended ? 'This event has ended' : ev.status !== 'published' ? 'Tickets are not on sale' : 'Your cart is empty'}</h2><p class="muted">Pick your tickets on the event page first.</p><a class="btn btn-primary" href="#/event/${esc(ev.id)}">Back to ${esc(ev.title)}</a></div>`;
     return;
   }
-  const subtotal = round2(lines.reduce((a, t) => a + t.price * qty[t.id], 0));
-  const fees = round2(lines.reduce((a, t) => a + fee(t.price) * qty[t.id], 0));
+  const subtotal = round2(lines.reduce((a, t) => a + amt[t.id] * qty[t.id], 0));
+  const fees = round2(lines.reduce((a, t) => a + fee(amt[t.id]) * qty[t.id], 0));
   const total = round2(subtotal + fees);
   const count = lines.reduce((a, t) => a + qty[t.id], 0);
   const np = String(me.name || '').trim().split(/\s+/);
@@ -773,7 +834,7 @@ async function pageCheckout(id) {
         <div class="muted small">📅 ${esc(fmtLong(ev.startsAt))}</div>
         <div class="muted small">📍 ${esc([ev.venue, ev.city].filter(Boolean).join(', '))}</div>
         <div class="summary">
-          ${lines.map((t) => `<div><span>${qty[t.id]} × ${esc(t.name)}</span><span>${t.price ? money(t.price * qty[t.id]) : 'Free'}</span></div>`).join('')}
+          ${lines.map((t) => `<div><span>${qty[t.id]} × ${esc(t.name)}${tierKindOf(t) === 'donation' ? ` <span class="muted small">(💝 ${money(amt[t.id])} each)</span>` : ''}</span><span>${amt[t.id] ? money(amt[t.id] * qty[t.id]) : 'Free'}</span></div>`).join('')}
           <div><span class="muted">Service fees</span><span>${money(fees)}</span></div>
           <div class="total"><span>Total</span><span>${money(total)}</span></div>
         </div>
@@ -791,7 +852,7 @@ async function pageCheckout(id) {
     const btn = document.getElementById('payBtn'); btn.disabled = true; btn.textContent = 'Processing…';
     try {
       const { order } = await api(`/api/events/${ev.id}/checkout`, { method: 'POST', body: {
-        items: Object.entries(qty).filter(([, q]) => q > 0).map(([tierId, q]) => ({ tierId, qty: q })),
+        items: Object.entries(qty).filter(([, q]) => q > 0).map(([tierId, q]) => ({ tierId, qty: q, ...(amt[tierId] !== undefined ? { amount: amt[tierId] } : {}) })),
         buyerFirstName: f.buyerFirstName, buyerLastName: f.buyerLastName, buyerEmail: f.buyerEmail, buyerPhone: f.buyerPhone,
         payment: { cardHolder: f.cardHolder, cardNumber: f.cardNumber, expiry: f.expiry, cvc: f.cvc }, captcha,
       } });
@@ -1033,7 +1094,7 @@ async function pageEventForm(id) {
   const def = new Date(Date.now() + 14 * 86400000); def.setHours(20, 0, 0, 0);
   const defEnd = new Date(def.getTime() + 4 * 3600000);
   const v = ev || { title: '', category: META.categories[0], description: '', startsAt: def.toISOString(), endsAt: defEnd.toISOString(), venue: '', address: '', city: '', imageUrl: '', status: 'published', tiers: [{ name: 'General Admission', price: 25, quantity: 100, sold: 0 }] };
-  let tiers = v.tiers.map((t) => ({ ...t }));
+  let tiers = v.tiers.map((t) => ({ ...t, kind: tierKindOf(t), suggested: t.suggested ?? '' }));
   let imageUrl = v.imageUrl;
   let imageShareUrl = v.imageShareUrl || '';
   const dir = await api('/api/directory').catch(() => ({ organizers: [], venues: [] }));
@@ -1263,7 +1324,9 @@ async function pageEventForm(id) {
   const syncTiers = () => {
     document.querySelectorAll('.tier-row').forEach((row, i) => {
       tiers[i].name = row.querySelector('[data-k=name]').value;
-      tiers[i].price = row.querySelector('[data-k=price]').value;
+      tiers[i].kind = row.querySelector('[data-k=kind]').value;
+      tiers[i].price = tiers[i].kind === 'free' ? 0 : row.querySelector('[data-k=price]').value;
+      tiers[i].suggested = row.querySelector('[data-k=suggested]').value;
       tiers[i].quantity = row.querySelector('[data-k=quantity]').value;
       tiers[i].description = row.querySelector('[data-k=description]').value;
       tiers[i].visibility = row.querySelector('[data-k=visibility]').value;
@@ -1273,7 +1336,12 @@ async function pageEventForm(id) {
     document.getElementById('tiers').innerHTML = tiers.map((t, i) => `
       <div class="tier-row">
         <div class="field"><label>Ticket name</label><input data-k="name" value="${esc(t.name)}" placeholder="e.g. VIP" required /></div>
-        <div class="field"><label>Price ($)</label><input data-k="price" type="number" min="0" step="0.01" value="${esc(t.price)}" ${t.sold ? 'readonly title="Price locked after sales"' : ''} required /></div>
+        <div class="field"><label>Ticket type</label><select data-k="kind" ${t.sold ? 'disabled title="Locked after sales"' : ''}>
+          <option value="paid" ${tierKindOf(t) === 'paid' ? 'selected' : ''}>💵 Paid</option>
+          <option value="free" ${tierKindOf(t) === 'free' ? 'selected' : ''}>🎁 Free</option>
+          <option value="donation" ${tierKindOf(t) === 'donation' ? 'selected' : ''}>💝 Donation</option></select></div>
+        <div class="field ${tierKindOf(t) === 'free' ? 'hidden' : ''}" data-f="price"><label>${tierKindOf(t) === 'donation' ? 'Minimum donation ($)' : 'Price ($)'}</label><input data-k="price" type="number" min="${tierKindOf(t) === 'paid' ? '0.01' : '0'}" step="0.01" value="${esc(tierKindOf(t) === 'free' ? 0 : t.price)}" ${t.sold ? 'readonly title="Price locked after sales"' : ''} ${tierKindOf(t) === 'free' ? '' : 'required'} /></div>
+        <div class="field ${tierKindOf(t) === 'donation' ? '' : 'hidden'}" data-f="suggested"><label>Suggested ($) <span class="muted small">(optional)</span></label><input data-k="suggested" type="number" min="0" step="0.01" value="${esc(t.suggested ?? '')}" placeholder="e.g. 20" /></div>
         <div class="field"><label>Quantity${t.sold ? ` <span class="muted small">(${t.sold} used)</span>` : ''}</label><input data-k="quantity" type="number" min="${t.sold || 1}" step="1" value="${esc(t.quantity)}" required /></div>
         <div class="field"><label>Visibility</label><select data-k="visibility">
           <option value="public" ${t.visibility !== 'private' ? 'selected' : ''}>🌐 Public — on sale</option>
@@ -1282,12 +1350,19 @@ async function pageEventForm(id) {
         <div class="field tier-desc-field"><label>Description <span class="muted small">(optional)</span></label><input data-k="description" maxlength="300" value="${esc(t.description || '')}" placeholder="e.g. Includes 1 free drink and fast-track entry" /></div>
       </div>`).join('');
     document.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => { syncTiers(); tiers.splice(Number(b.dataset.rm), 1); renderTiers(); }));
+    document.querySelectorAll('.tier-row [data-k=kind]').forEach((s) => (s.onchange = () => {
+      syncTiers();
+      const i = [...document.querySelectorAll('.tier-row')].indexOf(s.closest('.tier-row'));
+      if (s.value === 'paid' && !(Number(tiers[i].price) > 0)) tiers[i].price = '';
+      if (s.value === 'donation' && tiers[i].price === '') tiers[i].price = 0;
+      renderTiers();
+    }));
   };
   renderTiers();
   document.getElementById('addTier').onclick = () => {
     syncTiers();
     if (tiers.length >= 10) return toast('Maximum 10 ticket types', true);
-    tiers.push({ name: '', price: 0, quantity: 50, sold: 0, description: '', visibility: 'public' }); renderTiers();
+    tiers.push({ name: '', kind: 'paid', price: '', suggested: '', quantity: 50, sold: 0, description: '', visibility: 'public' }); renderTiers();
   };
 
   // ---- schedule: times a day × days (create only) ----

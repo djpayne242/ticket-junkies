@@ -999,3 +999,45 @@ a.chip, a.chip:hover { text-decoration: none; }
   .cal-pop-foot .btn { flex: 1; text-align: center; }
   .cal-hol { display: none; }
 }
+
+/* ---------- countdowns ---------- */
+.card-cd { margin-top: 6px; }
+.cd-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 99px; font-size: .8rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--blue); background: rgba(55, 110, 184, .12); }
+.cd-chip.is-live { color: #fff; background: #d93025; }
+.cd-chip.is-ended { color: var(--muted); background: var(--chip, rgba(0,0,0,.06)); }
+:root[data-theme="dark"] .cd-chip { color: #8fb4ec; background: rgba(55, 110, 184, .22); }
+:root[data-theme="dark"] .cd-chip.is-live { color: #fff; background: #d93025; }
+.cal-pop-body .cd-chip { align-self: flex-start; margin-top: 4px; }
+.cd-big { margin: 14px 0 6px; padding: 14px 16px; border-radius: 16px; color: #fff; background: linear-gradient(120deg, var(--blue), #1d3f73 55%, var(--orange, #eb742a)); box-shadow: var(--shadow); }
+.cd-big-label { font-weight: 800; font-size: .85rem; letter-spacing: .06em; text-transform: uppercase; opacity: .92; margin-bottom: 8px; }
+.cd-big-boxes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; max-width: 460px; }
+.cd-box { background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .25); border-radius: 12px; padding: 8px 4px; text-align: center; }
+.cd-box b { display: block; font-size: 1.9rem; line-height: 1.05; font-weight: 800; font-variant-numeric: tabular-nums; }
+.cd-box span { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .85; }
+.cd-big-msg { font-weight: 800; font-size: 1.15rem; }
+.cd-big.is-ended { background: var(--chip, #eef0f4); color: var(--muted); box-shadow: none; }
+@media (max-width: 640px) { .cd-box b { font-size: 1.5rem; } .cd-big { padding: 12px; } }
+
+/* ---------- card: price + Get tickets ---------- */
+.card-buy { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.card-buy .price { font-weight: 800; color: var(--orange, #eb742a); font-size: 1rem; }
+.card-get { pointer-events: none; white-space: nowrap; }
+.card:hover .card-get:not(.off) { filter: brightness(1.06); }
+.card-foot { justify-content: flex-end; }
+
+/* ---------- ticket kinds ---------- */
+.kind-badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .75rem; font-weight: 800; }
+.kind-badge.free { background: rgba(132, 214, 95, .22); color: #3f8a22; }
+.kind-badge.donation { background: rgba(235, 116, 42, .16); color: #c65a16; }
+:root[data-theme="dark"] .kind-badge.free { color: #a6e58a; }
+:root[data-theme="dark"] .kind-badge.donation { color: #f5a36d; }
+.don-amt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: .85rem; font-weight: 700; }
+.don-in { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--field-line, var(--line)); border-radius: 10px; background: var(--card); }
+.don-in input { width: 90px; border: 0; padding: 7px 2px; background: transparent; color: var(--ink); font: inherit; font-weight: 700; outline: none; }
+.tier-row .field.hidden { display: none; }
+/* ticket editor row: name · type · price · (suggested) · quantity · visibility · ✕, description below */
+.tier-row { grid-template-columns: minmax(160px, 2fr) repeat(auto-fit, minmax(118px, 1fr)); }
+.tier-row > [data-rm] { align-self: end; }
+.tier-row .tier-desc-field { grid-column: 1 / -1; }
+@media (max-width: 1000px) { .tier-row { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .tier-row { grid-template-columns: 1fr; } }

@@ -309,6 +309,22 @@ class TJ_Rest {
   // ---------- events ----------
   private static function is_public_tier($t) { return self::g($t, 'visibility') !== 'private'; }
   private static function geo_num($v) { return (is_int($v) || is_float($v)) && is_finite((float) $v) ? $v : null; }
+  // ---------- ticket kinds: paid = fixed price · free = $0 · donation = buyer picks the amount (price = minimum) ----------
+  public static function tier_kind($t) {
+    $k = self::g($t, 'kind');
+    if (in_array($k, array('paid', 'free', 'donation'), true)) return $k;
+    return (float) $t['price'] > 0 ? 'paid' : 'free';
+  }
+  /** Lowest open public price for "From $X" labels: priceFrom, priceKind, soldOut */
+  public static function lowest_price($tiers) {
+    $best = null;
+    foreach ($tiers as $t) {
+      if (self::g($t, 'visibility') === 'private' || $t['quantity'] - $t['sold'] <= 0) continue;
+      if ($best === null || $t['price'] < $best['price'] || ($t['price'] == $best['price'] && self::tier_kind($t) === 'paid')) $best = $t;
+    }
+    return $best ? array('priceFrom' => $best['price'], 'priceKind' => self::tier_kind($best), 'soldOut' => false) : array('priceFrom' => null, 'priceKind' => null, 'soldOut' => true);
+  }
+
   public static function public_event($ev, $viewer) {
     $org = TJ_Store::user_by_id($ev['organizerId']);
     $own = $viewer && ($viewer['id'] === (int) $ev['organizerId'] || $viewer['role'] === 'admin');
@@ -316,7 +332,7 @@ class TJ_Rest {
     foreach ($ev['tiers'] as $t) {
       if (self::g($t, 'visibility') === 'private' && !$own) continue;
       $tiers[] = array('id' => $t['id'], 'name' => $t['name'], 'description' => (string) self::g($t, 'description', ''), 'visibility' => self::g($t, 'visibility') === 'private' ? 'private' : 'public',
-        'price' => $t['price'], 'remaining' => max(0, $t['quantity'] - $t['sold']), 'fee' => self::n(self::ticket_fee($t['price'])));
+        'kind' => self::tier_kind($t), 'price' => $t['price'], 'suggested' => self::g($t, 'suggested'), 'remaining' => max(0, $t['quantity'] - $t['sold']), 'fee' => self::n(self::ticket_fee($t['price'])));
     }
     return array(
       'id' => $ev['id'], 'title' => $ev['title'], 'category' => $ev['category'], 'description' => $ev['description'],
@@ -408,18 +424,28 @@ class TJ_Rest {
     foreach (array_values($bt) as $i => $t) {
       if (!is_array($t)) $t = array();
       $name = self::str(self::g($t, 'name'), 'Ticket type #' . ($i + 1) . ' name', 60, true);
-      $price = self::round2(self::numk($t, 'price'));
-      if (!self::finite($price) || $price < 0 || $price > 10000) self::fail(400, 'Price for "' . $name . '" must be between 0 and 10,000');
+      $kind = in_array(self::g($t, 'kind'), array('paid', 'free', 'donation'), true) ? $t['kind'] : (self::numk($t, 'price') > 0 ? 'paid' : 'free');
+      $praw = self::g($t, 'price');
+      $price = $kind === 'free' ? 0 : self::round2(($praw === null || $praw === '') ? 0 : self::numk($t, 'price'));
+      if (!self::finite($price) || $price < 0 || $price > 10000) self::fail(400, ($kind === 'donation' ? 'Minimum donation' : 'Price') . ' for "' . $name . '" must be between 0 and 10,000');
+      if ($kind === 'paid' && $price <= 0) self::fail(400, '"' . $name . '" is a paid ticket, so it needs a price above $0. Choose "Free" for free tickets.');
+      $suggested = null;
+      $sraw = self::g($t, 'suggested');
+      if ($kind === 'donation' && $sraw !== null && trim((string) $sraw) !== '') {
+        $suggested = self::round2(self::numk($t, 'suggested'));
+        if (!self::finite($suggested) || $suggested < $price || $suggested > 10000) self::fail(400, 'Suggested donation for "' . $name . '" must be at least the minimum (' . TJ_Notify::money($price) . ') and at most 10,000');
+      }
       $quantity = self::numk($t, 'quantity');
       if (!self::is_integer_num($quantity) || $quantity < 1 || $quantity > 100000) self::fail(400, 'Quantity for "' . $name . '" must be a whole number from 1 to 100,000');
       $old = null;
       if (self::g($t, 'id')) foreach ($oldTiers as $o) if ($o['id'] === $t['id']) { $old = $o; break; }
       if ($old && $quantity < $old['sold']) self::fail(400, '"' . $name . '" already sold ' . $old['sold'] . '; quantity can\'t be lower');
-      if ($old && $old['sold'] - (int) self::g($old, 'comped', 0) > 0 && (float) $price !== (float) $old['price']) self::fail(400, '"' . $name . '" has sales; its price can\'t change');
+      if ($old && $old['sold'] - (int) self::g($old, 'comped', 0) > 0 && $kind !== self::tier_kind($old)) self::fail(400, '"' . $name . '" has sales; it can\'t be changed between paid, free and donation');
+      if ($old && $old['sold'] - (int) self::g($old, 'comped', 0) > 0 && (float) $price !== (float) $old['price']) self::fail(400, '"' . $name . '" has sales; its ' . ($kind === 'donation' ? 'minimum donation' : 'price') . ' can\'t change');
       $tdesc = self::str(self::g($t, 'description'), 'Description for "' . $name . '"', 300);
       $tiers[] = array(
         'id' => $old ? $old['id'] : TJ_Store::new_id('tier'), 'name' => $name, 'description' => $tdesc,
-        'visibility' => self::g($t, 'visibility') === 'private' ? 'private' : 'public', 'price' => self::n($price), 'quantity' => (int) $quantity,
+        'visibility' => self::g($t, 'visibility') === 'private' ? 'private' : 'public', 'kind' => $kind, 'price' => self::n($price), 'suggested' => $kind === 'donation' && $suggested !== null ? self::n($suggested) : null, 'quantity' => (int) $quantity,
         'sold' => $old ? (int) $old['sold'] : 0, 'comped' => $old ? (int) self::g($old, 'comped', 0) : 0,
       );
     }
@@ -476,7 +502,9 @@ class TJ_Rest {
     foreach ($ev['tiers'] as $t) {
       $c = (int) self::g($t, 'comped', 0);
       $sold += $t['sold']; $capacity += $t['quantity']; $comped += $c;
-      $revenue += max(0, $t['sold'] - $c) * $t['price'];
+      if (self::tier_kind($t) === 'donation') {
+        foreach ($orders as $o) { if (!empty($o['comp'])) continue; foreach ($o['items'] as $i) if ($i['tierId'] === $t['id']) $revenue += $i['price'] * $i['qty']; }
+      } else $revenue += max(0, $t['sold'] - $c) * $t['price'];
     }
     $checked = 0; $paidOrders = 0; $compOrders = 0;
     foreach ($orders as $o) {
@@ -762,12 +790,11 @@ class TJ_Rest {
         'startDay' => $start, 'days' => $days, 'ended' => TJ_Store::ts_ms($e['endsAt']) < $now,
       );
       $pe = self::public_event($e, $viewer);
-      $min = null;
-      foreach ($pe['tiers'] as $t) { if ($t['visibility'] === 'private' || $t['remaining'] <= 0) continue; $min = $min === null ? $t['price'] : min($min, $t['price']); }
+      $lp = self::lowest_price($e['tiers']);
       $i = count($out) - 1;
       $out[$i]['city'] = (string) self::g($e, 'city'); $out[$i]['imageUrl'] = (string) self::g($e, 'imageUrl');
       $out[$i]['summary'] = self::short_text(self::g($e, 'description')); $out[$i]['organizer'] = $pe['organizer'];
-      $out[$i]['priceFrom'] = $min; $out[$i]['soldOut'] = $min === null;
+      $out[$i]['priceFrom'] = $lp['priceFrom']; $out[$i]['priceKind'] = $lp['priceKind']; $out[$i]['soldOut'] = $lp['soldOut'];
     }
     usort($out, function ($a, $b) { return TJ_Store::ts_ms($a['startsAt']) <=> TJ_Store::ts_ms($b['startsAt']); });
     $s = self::settings();
@@ -905,7 +932,15 @@ class TJ_Rest {
       if ($ti === null) self::fail(400, 'Unknown ticket type');
       $tier = $ev['tiers'][$ti];
       if ($tier['quantity'] - $tier['sold'] < $qty) self::fail(409, 'Only ' . ($tier['quantity'] - $tier['sold']) . ' "' . $tier['name'] . '" tickets left');
-      $lines[] = array('ti' => $ti, 'qty' => (int) $qty);
+      // donation tickets: the buyer picks the amount per ticket, at least the organizer's minimum
+      $kind = self::tier_kind($tier);
+      $unit = $kind === 'free' ? 0 : (float) $tier['price'];
+      if ($kind === 'donation') {
+        $unit = self::round2(self::numk($it, 'amount'));
+        if (!self::finite($unit) || $unit < (float) $tier['price']) self::fail(400, 'Enter a donation of at least ' . TJ_Notify::money($tier['price']) . ' for "' . $tier['name'] . '"');
+        if ($unit > 10000) self::fail(400, 'Donations are limited to $10000.00 per ticket');
+      }
+      $lines[] = array('ti' => $ti, 'qty' => (int) $qty, 'unit' => $unit, 'donation' => $kind === 'donation');
     }
     if (!$lines) self::fail(400, 'Select at least one ticket');
 
@@ -923,7 +958,7 @@ class TJ_Rest {
     if (!$buyerPhone) self::fail(400, 'Enter a valid mobile number so we can text your tickets');
 
     $subtotal = 0; $fees = 0;
-    foreach ($lines as $l) { $t = $ev['tiers'][$l['ti']]; $subtotal += $t['price'] * $l['qty']; $fees += self::ticket_fee($t['price']) * $l['qty']; }
+    foreach ($lines as $l) { $subtotal += $l['unit'] * $l['qty']; $fees += self::ticket_fee($l['unit']) * $l['qty']; }
     $subtotal = self::round2($subtotal); $fees = self::round2($fees);
     $total = self::round2($subtotal + $fees);
 
@@ -949,8 +984,10 @@ class TJ_Rest {
     foreach ($lines as $l) {
       $ev['tiers'][$l['ti']]['sold'] += $l['qty'];
       $t = $ev['tiers'][$l['ti']];
-      for ($i = 0; $i < $l['qty']; $i++) $tickets[] = array('code' => self::ticket_code(), 'tierId' => $t['id'], 'tierName' => $t['name'], 'price' => $t['price'], 'checkedIn' => false);
-      $oitems[] = array('tierId' => $t['id'], 'tierName' => $t['name'], 'price' => $t['price'], 'qty' => $l['qty']);
+      for ($i = 0; $i < $l['qty']; $i++) $tickets[] = array('code' => self::ticket_code(), 'tierId' => $t['id'], 'tierName' => $t['name'], 'price' => self::n($l['unit']), 'checkedIn' => false);
+      $item = array('tierId' => $t['id'], 'tierName' => $t['name'], 'price' => self::n($l['unit']), 'qty' => $l['qty']);
+      if ($l['donation']) $item['donation'] = true;
+      $oitems[] = $item;
     }
     $order = array_merge(array(
       'id' => TJ_Store::new_id('ord'), 'userId' => $user['id'], 'eventId' => $ev['id'],
@@ -1794,10 +1831,10 @@ class TJ_Rest {
       foreach ($e['tiers'] as $t) { $cap += $t['quantity']; $soldAll += $t['sold']; }
       $tiers = array();
       foreach ($e['tiers'] as $t) {
-        $q = 0; $cq = 0;
-        foreach ($p as $o) foreach ($o['items'] as $i) if ($i['tierId'] === $t['id']) $q += $i['qty'];
+        $q = 0; $cq = 0; $rev = 0;
+        foreach ($p as $o) foreach ($o['items'] as $i) if ($i['tierId'] === $t['id']) { $q += $i['qty']; $rev += $i['price'] * $i['qty']; }
         foreach ($pc as $o) foreach ($o['items'] as $i) if ($i['tierId'] === $t['id']) $cq += $i['qty'];
-        $tiers[] = array('name' => $t['name'] . (self::g($t, 'visibility') === 'private' ? ' (private)' : ''), 'price' => $t['price'], 'quantity' => $t['quantity'], 'sold' => $q, 'comps' => $cq, 'revenue' => self::n(self::round2($q * $t['price'])));
+        $tiers[] = array('name' => $t['name'] . (self::g($t, 'visibility') === 'private' ? ' (private)' : '') . (self::tier_kind($t) === 'donation' ? ' (donation)' : ''), 'price' => $t['price'], 'quantity' => $t['quantity'], 'sold' => $q, 'comps' => $cq, 'revenue' => self::n(self::round2($rev)));
       }
       $r = array(
         'id' => $e['id'], 'title' => $e['title'], 'startsAt' => $e['startsAt'], 'venue' => $e['venue'], 'status' => $e['status'], 'organizer' => (!empty($e['organizerName']) ? $e['organizerName'] : ($prom ? ($prom['organization'] ? $prom['organization'] : $prom['name']) : '')),
