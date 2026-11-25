@@ -20,6 +20,15 @@ This repository has **two versions of the same website**:
 
 Step-by-step guide: [`WORDPRESS-INSTALL.md`](WORDPRESS-INSTALL.md)
 
+## Connected to WordPress (automatic updates)
+The plugin checks this repository's **Releases** for new versions. When a newer release is published, your WordPress dashboard shows **"Update available"** for TicketJunkies on the **Plugins** screen, and you update in one click, or turn on **Enable auto-updates** to have it update by itself.
+
+- Check right away with **Plugins → TicketJunkies → Check GitHub for updates**.
+- **Publishing a new version (developers):**
+  1. Change `Version:` and `TJ_VERSION` in `wordpress-plugin/ticketjunkies/ticketjunkies.php`.
+  2. Rebuild `dist/ticketjunkies-wordpress-plugin.zip`, then commit and push.
+  3. Run `gh release create v1.2.0 dist/ticketjunkies-wordpress-plugin.zip`. The release must include a file named exactly `ticketjunkies-wordpress-plugin.zip`.
+
 ## Features
 - Events with flyers, several organizers, several venues, maps and weather
 - Shows 1, 2 or 3 times a day (Morning, Midday, Evening), on one day, several days, or any mix of days and times. Each show has its own tickets
