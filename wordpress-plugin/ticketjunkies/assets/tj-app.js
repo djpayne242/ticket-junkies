@@ -430,9 +430,6 @@ function searchFormHtml(v, o = {}) {
       ${o.showCategory === false ? '' : sel('category', 'Category', 'All categories', META.categories, v.category)}
       ${sel('organizer', 'Organizer', 'All organizers', keep([], v.organizer), v.organizer)}
       ${sel('venue', 'Venue', 'All venues', keep([], v.venue), v.venue)}
-      <label class="sf"><span>Date</span><input type="date" name="date" value="${esc(v.date)}" /></label>
-      ${sel('year', 'Year', 'Any year', keep([], v.year), v.year)}
-      ${sel('time', 'Time', 'Any time', SEARCH_TIMES, v.time)}
     </div>
     <div class="sf-foot ${searchActive(v) ? '' : 'hidden'}"><a href="#" class="sf-clear">✕ Clear search</a></div>
   </form>`;
@@ -460,6 +457,72 @@ function wireSearchForm(form, v, onGo) {
   });
 }
 function norm(x) { return String(x || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+
+// ---------- Calendar of events (month view, days with events highlighted) ----------
+const CAL_WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function calendarHtml(o = {}) {
+  return `<section class="cal-section">
+    <div class="section-head"><h2>${esc(o.title || '📅 Calendar of events')}</h2><span class="muted small cal-count"></span></div>
+    <div class="cal-card">
+      <div class="cal-top">
+        <button type="button" class="cal-nav" data-step="-1" aria-label="Previous month">‹</button>
+        <h3 class="cal-title">&nbsp;</h3>
+        <button type="button" class="cal-nav" data-step="1" aria-label="Next month">›</button>
+        <button type="button" class="cal-today">Today</button>
+      </div>
+      <div class="cal-grid"><div class="loading" style="grid-column:1/-1">Loading calendar…</div></div>
+      <div class="cal-day"></div>
+    </div></section>`;
+}
+function mountCalendar(sec) {
+  if (!sec) return;
+  const grid = sec.querySelector('.cal-grid'), title = sec.querySelector('.cal-title'), dayEl = sec.querySelector('.cal-day'), countEl = sec.querySelector('.cal-count');
+  let data = null, sel = '';
+  const ym = (m) => [Number(m.slice(0, 4)), Number(m.slice(5, 7))];
+  const monthName = (m) => { const [y, mo] = ym(m); return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }); };
+  const shift = (m, n) => { const [y, mo] = ym(m); return new Date(Date.UTC(y, mo - 1 + n, 1)).toISOString().slice(0, 7); };
+  const byDay = () => { const map = {}; for (const e of data.events) for (const d of e.days) (map[d] ||= []).push(e); return map; };
+  const showDay = (map) => {
+    const list = sel ? map[sel] || [] : [];
+    if (!list.length) { dayEl.innerHTML = `<p class="muted small cal-hint">${data.events.length ? 'Tap a highlighted date to see its events.' : 'No events this month yet.'}</p>`; return; }
+    const label = new Date(sel + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    dayEl.innerHTML = `<h4>${esc(label)}</h4>` + list.map((e) => `<a class="cal-item${e.ended ? ' ended' : ''}" href="#/event/${encodeURIComponent(e.id)}">
+      <span class="cal-time">${esc(e.startDay === sel ? e.time : 'Continues')}</span>
+      <span class="cal-info"><span class="t">${esc(e.title)}</span>${e.sessionLabel ? ` <span class="tag">${esc(e.sessionLabel)}</span>` : ''}<span class="v">📍 ${esc(e.venue)}${e.ended ? ' · Ended' : ''}</span></span>
+      <span class="cal-go">View →</span></a>`).join('');
+    if (typeof tjFixLinks === 'function') tjFixLinks(dayEl);
+  };
+  const render = () => {
+    const map = byDay(); const [y, mo] = ym(data.month);
+    const first = new Date(Date.UTC(y, mo - 1, 1)).getUTCDay(), n = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    title.textContent = monthName(data.month);
+    const cells = CAL_WD.map((w) => `<div class="cal-wd">${w}</div>`);
+    for (let i = 0; i < first; i++) cells.push('<div class="cal-cell blank" aria-hidden="true"></div>');
+    for (let d = 1; d <= n; d++) {
+      const key = `${data.month}-${String(d).padStart(2, '0')}`, evs = map[key] || [];
+      const cls = ['cal-cell', evs.length ? 'has-ev' : '', key === data.today ? 'today' : '', key < data.today ? 'past' : '', key === sel ? 'sel' : ''].filter(Boolean).join(' ');
+      const inner = `<span class="cal-num">${d}</span>${evs.slice(0, 2).map((e) => `<span class="cal-ev">${esc(e.title)}</span>`).join('')}${evs.length > 2 ? `<span class="cal-more">+${evs.length - 2} more</span>` : ''}${evs.length ? `<span class="cal-dots">${evs.slice(0, 3).map(() => '<i></i>').join('')}</span>` : ''}`;
+      cells.push(evs.length ? `<button type="button" class="${cls}" data-day="${key}" aria-label="${esc(d + ' ' + monthName(data.month) + ': ' + evs.map((e) => e.title).join(', '))}">${inner}</button>` : `<div class="${cls}">${inner}</div>`);
+    }
+    grid.innerHTML = cells.join('');
+    const c = data.events.length;
+    countEl.textContent = c ? `${c} event${c === 1 ? '' : 's'} in ${monthName(data.month)}` : 'No events this month';
+    grid.querySelectorAll('button[data-day]').forEach((b) => { b.onclick = () => { sel = b.dataset.day; render(); }; });
+    showDay(map);
+  };
+  const load = async (m) => {
+    grid.style.opacity = '.5';
+    try { data = await api('/api/calendar' + (m ? '?month=' + m : '')); }
+    catch (e) { grid.style.opacity = ''; grid.innerHTML = `<div class="error" style="grid-column:1/-1">${esc(e.message)}</div>`; return; }
+    grid.style.opacity = '';
+    const days = Object.keys(byDay()).sort();
+    sel = days.includes(data.today) ? data.today : (days.find((d) => d >= data.today) || '');
+    render();
+  };
+  sec.querySelectorAll('.cal-nav').forEach((b) => { b.onclick = () => data && load(shift(data.month, Number(b.dataset.step))); });
+  sec.querySelector('.cal-today').onclick = () => load('');
+  load('');
+}
 
 // ---------- pages ----------
 async function pageHome(params) {
@@ -489,6 +552,7 @@ async function pageHome(params) {
       <div class="section-head"><h2>🗺️ ${searchActive(sv) ? 'These events on the map' : 'Live events on the map'}</h2><span class="muted small" id="mapCount">Tap a pin to see the event</span></div>
       <div class="events-map" id="eventsMap"><div class="loading">Loading map…</div></div>
     </section>
+    ${calendarHtml()}
     <div class="section-head"><h2>${searchActive(sv) ? 'Search results' : 'Upcoming events'}</h2><span class="muted small" id="count"></span></div>
     <div class="grid" id="grid"><div class="loading">Loading events…</div></div>
     ${me?.role === 'organizer' ? '' : `
@@ -497,6 +561,7 @@ async function pageHome(params) {
       <a class="btn btn-primary" href="#/register?role=organizer">Start selling — it's free</a>
     </section>`}`;
   wireSearchForm($app.querySelector('form.search-adv'), sv, (p) => go('#/' + (p.toString() ? '?' + p : '')));
+  mountCalendar($app.querySelector('.cal-section'));
   const p = searchParams(sv);
   if (META.weatherPlace) TJGeo.homeWeather(document.getElementById('homeWx'), META.weatherPlace);
   startHomeClock();
@@ -2454,6 +2519,11 @@ const TJ_WIDGETS = {
     if (o.showWeather !== false && place) TJGeo.homeWeather(el.querySelector('#homeWx'), place);
     if (o.showClock !== false) startHomeClock();
   },
+  // Month calendar with event days highlighted
+  calendar(el, o) {
+    el.innerHTML = calendarHtml(o);
+    mountCalendar(el.querySelector('.cal-section'));
+  },
   cta(el, o) {
     if (me?.role === 'organizer' && o.hideForOrganizers !== false) { el.innerHTML = '<a class="btn btn-green" href="#/create">+ Create an event</a>'; return; }
     el.innerHTML = `<div class="hero-cta"><span>${esc(o.text || 'Hosting an event?')}</span><a class="link" href="#/register?role=organizer">${esc(o.link || 'Become an organizer →')}</a></div>`;
@@ -2478,8 +2548,23 @@ function tjAutoHero(root) {
   }
 }
 
+// Pages that have the events map but no calendar get the "Calendar of events" right under the map.
+// Turn off with: add_filter('tj_auto_calendar', '__return_false');
+function tjAutoCalendar(root) {
+  if (!window.TJ_CONFIG || TJ_CONFIG.autoCalendar === false || !root.querySelectorAll) return;
+  if (document.querySelector('[data-tj-widget="calendar"], .cal-section')) return;
+  const map = root.querySelector('[data-tj-widget="map"]:not([data-tj-mounted])');
+  if (!map) return;
+  const cal = document.createElement('div');
+  cal.className = 'tj-root tj-widget';
+  cal.setAttribute('data-tj-widget', 'calendar');
+  cal.setAttribute('data-tj-opts', '{}');
+  map.parentNode.insertBefore(cal, map.nextSibling);
+}
+
 function tjMountAll(root) {
   tjAutoHero(root);
+  tjAutoCalendar(root);
   const els = [...(root.querySelectorAll ? root.querySelectorAll('[data-tj-widget]') : [])];
   // screens first so links on the same page are recognised
   els.sort((a, b) => (a.dataset.tjWidget === 'screen' ? -1 : 0) - (b.dataset.tjWidget === 'screen' ? -1 : 0));

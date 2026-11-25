@@ -180,6 +180,20 @@ class TJ_W_Hero extends TJ_Widget_Base { protected $tj_type = 'hero';
   }
   protected function tj_opts(array $s) { return ['title' => $s['title'] ?? '', 'subtitle' => $s['subtitle'] ?? null, 'showWeather' => ($s['show_weather'] ?? 'yes') === 'yes', 'showClock' => ($s['show_clock'] ?? 'yes') === 'yes', 'showCta' => ($s['show_cta'] ?? 'yes') === 'yes']; }
 }
+class TJ_W_Calendar extends TJ_Widget_Base { protected $tj_type = 'calendar';
+  public function get_name() { return 'tj_calendar'; } public function get_title() { return 'TJ Calendar of Events'; } public function get_icon() { return 'eicon-calendar'; }
+  protected function tj_content_controls() {
+    $this->add_control('title', ['label' => 'Title', 'type' => Controls_Manager::TEXT, 'default' => '📅 Calendar of events']);
+    $this->add_control('cal_note', ['type' => Controls_Manager::RAW_HTML, 'raw' => '<small>Shows the current month. Days with events are highlighted; visitors tap a day to see its events and use ‹ › to change month.</small>']);
+  }
+  protected function tj_extra_style_controls() {
+    $this->start_controls_section('tj_cal_c', ['label' => 'Highlighted days', 'tab' => Controls_Manager::TAB_STYLE]);
+    $this->add_control('cal_hl', ['label' => 'Day number color', 'type' => Controls_Manager::COLOR, 'selectors' => ['{{WRAPPER}} .cal-cell.has-ev .cal-num' => 'background: {{VALUE}};', '{{WRAPPER}} .cal-cell.has-ev' => 'border-color: {{VALUE}};']]);
+    $this->add_control('cal_ev', ['label' => 'Event label color', 'type' => Controls_Manager::COLOR, 'selectors' => ['{{WRAPPER}} .cal-ev, {{WRAPPER}} .cal-dots i' => 'background: {{VALUE}};']]);
+    $this->end_controls_section();
+  }
+  protected function tj_opts(array $s) { return ['title' => $s['title'] ?? '']; }
+}
 class TJ_W_Cta extends TJ_Widget_Base { protected $tj_type = 'cta';
   public function get_name() { return 'tj_cta'; } public function get_title() { return 'TJ "Become an Organizer" Link'; } public function get_icon() { return 'eicon-call-to-action'; }
   protected function tj_content_controls() {
@@ -196,5 +210,5 @@ class TJ_W_Cta extends TJ_Widget_Base { protected $tj_type = 'cta';
 }
 
 function tj_elementor_widget_classes() {
-  return ['TJ_W_Hero', 'TJ_W_Search', 'TJ_W_Weather', 'TJ_W_Cta', 'TJ_W_Chips', 'TJ_W_Map', 'TJ_W_Grid', 'TJ_W_Event', 'TJ_W_Checkout', 'TJ_W_Tickets', 'TJ_W_Organizer', 'TJ_W_Admin', 'TJ_W_Login', 'TJ_W_Register', 'TJ_W_Ticket', 'TJ_W_Home'];
+  return ['TJ_W_Hero', 'TJ_W_Search', 'TJ_W_Weather', 'TJ_W_Cta', 'TJ_W_Chips', 'TJ_W_Map', 'TJ_W_Calendar', 'TJ_W_Grid', 'TJ_W_Event', 'TJ_W_Checkout', 'TJ_W_Tickets', 'TJ_W_Organizer', 'TJ_W_Admin', 'TJ_W_Login', 'TJ_W_Register', 'TJ_W_Ticket', 'TJ_W_Home'];
 }

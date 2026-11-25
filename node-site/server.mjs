@@ -797,6 +797,34 @@ route('GET', '/api/search-options', () => {
   return { organizers: [...orgs.values()].sort(abc), venues: [...venues.values()].sort(abc), years: [...years].sort() };
 });
 
+// Calendar of events: every published event on the days it takes place (Nassau time).
+// An overnight party that ends before 6 AM only counts on the day it starts.
+const siteTimeFmt = new Intl.DateTimeFormat('en-US', { timeZone: SITE_TZ, hour: 'numeric', minute: '2-digit' });
+function calendarDays(e) {
+  const start = siteParts(e.startsAt).date;
+  let end = siteParts(new Date(new Date(e.endsAt).getTime() - 6 * 3600e3)).date;
+  if (end < start) end = start;
+  const out = []; const d = new Date(start + 'T00:00:00Z');
+  for (let i = 0; i < 62; i++) { const k = d.toISOString().slice(0, 10); if (k > end) break; out.push(k); d.setUTCDate(d.getUTCDate() + 1); }
+  return out;
+}
+route('GET', '/api/calendar', ({ query }) => {
+  const today = siteParts(new Date()).date;
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.get('month') || '') ? query.get('month') : today.slice(0, 7);
+  const now = Date.now();
+  const events = [];
+  for (const e of db.events) {
+    if (e.status !== 'published') continue;
+    const all = calendarDays(e);
+    const days = all.filter((k) => k.startsWith(month));
+    if (!days.length) continue;
+    events.push({ id: e.id, title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, venue: e.venue || '', category: e.category, sessionLabel: e.sessionLabel || '',
+      time: siteTimeFmt.format(new Date(e.startsAt)), startDay: all[0], days, ended: new Date(e.endsAt).getTime() < now });
+  }
+  events.sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt));
+  return { month, today, events };
+});
+
 route('GET', '/api/events', ({ req, query }) => {
   const viewer = currentUser(req);
   const q = (query.get('q') || '').toLowerCase().trim();

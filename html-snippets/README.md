@@ -17,6 +17,7 @@ The plugin already creates all of these pages for you. Use the snippets only whe
 | `05-category-buttons.html` | Category buttons (Music, Nightlife, Comedy…) |
 | `06-events-map.html` | Live events map |
 | `07-event-grid.html` | Upcoming events grid |
+| `08-calendar.html` | Calendar of events (current month, event days highlighted) |
 | `10-event-page.html` | Event details & ticket picker (put on the "event" page) |
 | `11-checkout.html` | Checkout (put on the "checkout" page) |
 | `12-my-tickets-dashboard.html` | Attendee ticket dashboard (put on the "my-tickets" page) |

@@ -95,6 +95,7 @@ final class TJ_Frontend {
       'assets' => TJ_URL . 'assets/', 'pages' => $pages, 'editor' => self::is_editor(),
       'lostPassword' => wp_lostpassword_url(tj_page_url('login')),
       'autoHero' => (bool) apply_filters('tj_auto_hero', true),
+      'autoCalendar' => (bool) apply_filters('tj_auto_calendar', true),
     ];
     if ($cfg['editor']) {
       $r = rest_do_request(new WP_REST_Request('GET', '/tj/v1/events'));
@@ -206,6 +207,7 @@ final class TJ_Frontend {
       $hero,
       self::w('tj_chips', []),
       self::w('tj_map', []),
+      self::w('tj_calendar', []),
       self::w('tj_grid', []),
       $promo,
     ], ['content_width' => 'boxed', 'padding' => self::px(28, 20, 60, 20), 'flex_gap' => ['unit' => 'px', 'size' => 26, 'column' => '26', 'row' => '26']])];

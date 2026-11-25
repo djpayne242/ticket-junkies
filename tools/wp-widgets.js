@@ -91,6 +91,11 @@ const TJ_WIDGETS = {
     if (o.showWeather !== false && place) TJGeo.homeWeather(el.querySelector('#homeWx'), place);
     if (o.showClock !== false) startHomeClock();
   },
+  // Month calendar with event days highlighted
+  calendar(el, o) {
+    el.innerHTML = calendarHtml(o);
+    mountCalendar(el.querySelector('.cal-section'));
+  },
   cta(el, o) {
     if (me?.role === 'organizer' && o.hideForOrganizers !== false) { el.innerHTML = '<a class="btn btn-green" href="#/create">+ Create an event</a>'; return; }
     el.innerHTML = `<div class="hero-cta"><span>${esc(o.text || 'Hosting an event?')}</span><a class="link" href="#/register?role=organizer">${esc(o.link || 'Become an organizer →')}</a></div>`;
@@ -115,8 +120,23 @@ function tjAutoHero(root) {
   }
 }
 
+// Pages that have the events map but no calendar get the "Calendar of events" right under the map.
+// Turn off with: add_filter('tj_auto_calendar', '__return_false');
+function tjAutoCalendar(root) {
+  if (!window.TJ_CONFIG || TJ_CONFIG.autoCalendar === false || !root.querySelectorAll) return;
+  if (document.querySelector('[data-tj-widget="calendar"], .cal-section')) return;
+  const map = root.querySelector('[data-tj-widget="map"]:not([data-tj-mounted])');
+  if (!map) return;
+  const cal = document.createElement('div');
+  cal.className = 'tj-root tj-widget';
+  cal.setAttribute('data-tj-widget', 'calendar');
+  cal.setAttribute('data-tj-opts', '{}');
+  map.parentNode.insertBefore(cal, map.nextSibling);
+}
+
 function tjMountAll(root) {
   tjAutoHero(root);
+  tjAutoCalendar(root);
   const els = [...(root.querySelectorAll ? root.querySelectorAll('[data-tj-widget]') : [])];
   // screens first so links on the same page are recognised
   els.sort((a, b) => (a.dataset.tjWidget === 'screen' ? -1 : 0) - (b.dataset.tjWidget === 'screen' ? -1 : 0));

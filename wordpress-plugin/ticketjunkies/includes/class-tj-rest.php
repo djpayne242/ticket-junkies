@@ -98,6 +98,7 @@ class TJ_Rest {
   private static function define_routes() {
     self::route('GET', '/meta', 'r_meta');
     self::route('GET', '/search-options', 'r_search_options');
+    self::route('GET', '/calendar', 'r_calendar');
     self::route('GET', '/weather', 'r_weather');
     self::route('GET', '/geocode', 'r_geocode');
     self::route('POST', '/auth/register', 'r_register');
@@ -731,6 +732,33 @@ class TJ_Rest {
     }
     return true;
   }
+  /** Calendar of events: published events on the days they take place (site time zone).
+   *  An overnight party that ends before 6 AM only counts on the day it starts. */
+  public static function r_calendar($c) {
+    $today = wp_date('Y-m-d');
+    $month = (string) self::q($c, 'month');
+    if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month)) $month = substr($today, 0, 7);
+    $now = self::now_ms();
+    $out = array();
+    foreach (TJ_Store::events() as $e) {
+      if ($e['status'] !== 'published') continue;
+      $start = self::site_parts($e['startsAt']); $start = $start['date'];
+      $end = self::site_parts(TJ_Store::ts_ms($e['endsAt']) - 6 * 3600 * 1000); $end = $end['date'];
+      if ($end < $start) $end = $start;
+      $days = array(); $d = new DateTime($start . ' 00:00:00', new DateTimeZone('UTC'));
+      for ($i = 0; $i < 62; $i++) { $k = $d->format('Y-m-d'); if ($k > $end) break; if (substr($k, 0, 7) === $month) $days[] = $k; $d->modify('+1 day'); }
+      if (!$days) continue;
+      $out[] = array(
+        'id' => $e['id'], 'title' => $e['title'], 'startsAt' => $e['startsAt'], 'endsAt' => $e['endsAt'],
+        'venue' => (string) self::g($e, 'venue'), 'category' => (string) self::g($e, 'category'), 'sessionLabel' => (string) self::g($e, 'sessionLabel'),
+        'time' => wp_date('g:i A', (int) floor(TJ_Store::ts_ms($e['startsAt']) / 1000)), 'startDay' => $start, 'days' => $days,
+        'ended' => TJ_Store::ts_ms($e['endsAt']) < $now,
+      );
+    }
+    usort($out, function ($a, $b) { return TJ_Store::ts_ms($a['startsAt']) <=> TJ_Store::ts_ms($b['startsAt']); });
+    return array('month' => $month, 'today' => $today, 'events' => $out);
+  }
+
   /** Choices for the search dropdowns, from events people can buy tickets for right now. */
   public static function r_search_options($c) {
     $now = self::now_ms();
