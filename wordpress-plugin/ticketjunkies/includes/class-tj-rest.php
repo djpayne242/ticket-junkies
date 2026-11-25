@@ -145,6 +145,7 @@ class TJ_Rest {
     self::route('PUT', '/admin/settings', 'r_admin_settings_put');
     self::route('PUT', '/admin/captcha', 'r_admin_captcha');
     self::route('PUT', '/admin/maps', 'r_admin_maps');
+    self::route('PUT', '/admin/preloader', 'r_admin_preloader');
     self::route('POST', '/admin/maps/locate-all', 'r_admin_locate_all');
     self::route('PUT', '/admin/notifications', 'r_admin_notifications_put');
     self::route('POST', '/admin/notifications/test', 'r_admin_notifications_test');
@@ -660,6 +661,7 @@ class TJ_Rest {
       'categories' => TJ_Store::$CATEGORIES, 'feePercent' => $s['feePercent'], 'feeFixed' => $s['feeFixed'],
       'maps' => array('googleMapsKey' => $m['googleMapsKey'], 'center' => array('lat' => $m['weatherLat'], 'lng' => $m['weatherLng'])),
       'captcha' => self::captcha_public(),
+      'preloader' => $s['preloader'],
       'weatherPlace' => array('name' => $m['weatherPlace'], 'lat' => $m['weatherLat'], 'lng' => $m['weatherLng']),
     );
   }
@@ -1611,7 +1613,7 @@ class TJ_Rest {
     $cap = $s['captcha'];
     $cap['secretKey'] = !empty($cap['secretKey']) ? '••••' . substr($cap['secretKey'], -4) : '';
     $cap['testKeys'] = $s['captcha']['siteKey'] === TJ_Store::RECAPTCHA_TEST_SITE;
-    return array('feePercent' => $s['feePercent'], 'feeFixed' => $s['feeFixed'], 'notifications' => $n, 'maps' => $s['maps'], 'captcha' => $cap,
+    return array('feePercent' => $s['feePercent'], 'feeFixed' => $s['feeFixed'], 'notifications' => $n, 'maps' => $s['maps'], 'preloader' => $s['preloader'], 'captcha' => $cap,
       'defaultAdminRecipients' => array_map(function ($u) { return $u['email']; }, TJ_Notify::active_admins()));
   }
   public static function r_admin_settings($c) { self::require_admin(); return array('settings' => self::settings_view()); }
@@ -1678,6 +1680,43 @@ class TJ_Rest {
     }
     $s['maps'] = $m;
     TJ_Store::save_settings($s);
+    return array('settings' => self::settings_view());
+  }
+
+  // ---------- preloader ----------
+  public static $PRE_ICONS = array('logo', 'ticket', 'vinyl', 'ring', 'music', 'star', 'bolt', 'heart', 'custom');
+  public static $PRE_ANIMS = array('spin', 'pulse', 'rumble', 'flash', 'bounce', 'flip', 'still');
+  public static $PRE_SPEEDS = array('slow', 'normal', 'fast');
+  public static $PRE_BGS = array('page', 'dim', 'clear');
+  public static function r_admin_preloader($c) {
+    self::require_admin();
+    $b = $c['body'];
+    $s = self::settings();
+    $p = $s['preloader'];
+    if (self::has($b, 'enabled')) $p['enabled'] = (bool) $b['enabled'];
+    if (self::has($b, 'icon')) { if (!in_array($b['icon'], self::$PRE_ICONS, true)) self::fail(400, 'Pick one of the preloader icons'); $p['icon'] = $b['icon']; }
+    if (self::has($b, 'customUrl')) {
+      $u = trim((string) $b['customUrl']);
+      if ($u !== '') {
+        $host = (string) wp_parse_url(home_url(), PHP_URL_HOST);
+        $uh = (string) wp_parse_url($u, PHP_URL_HOST);
+        $path = (string) wp_parse_url($u, PHP_URL_PATH);
+        if (!preg_match('~^https?://~i', $u) || strcasecmp($uh, $host) !== 0 || !preg_match('~\.(png|jpe?g|webp|gif)$~i', $path)) self::fail(400, 'Upload your preloader icon with the Upload button');
+        $u = esc_url_raw($u);
+      }
+      $p['customUrl'] = $u;
+    }
+    if (self::has($b, 'size')) {
+      $n = self::numk($b, 'size');
+      if (!self::finite($n) || floor($n) != $n || $n < 24 || $n > 160) self::fail(400, 'Icon size must be between 24 and 160 pixels');
+      $p['size'] = (int) $n;
+    }
+    $rules = array('animation' => array(self::$PRE_ANIMS, 'Pick one of the animations'), 'speed' => array(self::$PRE_SPEEDS, 'Pick a speed'), 'background' => array(self::$PRE_BGS, 'Pick a background'));
+    foreach ($rules as $k => $rule) if (self::has($b, $k)) { if (!in_array($b[$k], $rule[0], true)) self::fail(400, $rule[1]); $p[$k] = $b[$k]; }
+    if ($p['icon'] === 'custom' && $p['customUrl'] === '') self::fail(400, 'Upload your own icon first, or pick one of the built-in icons');
+    $s['preloader'] = $p;
+    TJ_Store::save_settings($s);
+    do_action('litespeed_purge_all'); // page caches would otherwise keep showing the old preloader
     return array('settings' => self::settings_view());
   }
 

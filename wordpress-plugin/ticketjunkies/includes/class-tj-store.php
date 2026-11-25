@@ -107,6 +107,7 @@ class TJ_Store {
         'googleMapsKey' => '', 'country' => 'Bahamas',
         'weatherPlace' => 'Nassau, Bahamas', 'weatherLat' => 25.0582, 'weatherLng' => -77.3431,
       ),
+      'preloader' => array('enabled' => true, 'icon' => 'logo', 'customUrl' => '', 'size' => 56, 'animation' => 'pulse', 'speed' => 'normal', 'background' => 'page'),
     );
   }
 
@@ -117,7 +118,7 @@ class TJ_Store {
     $d = self::defaults();
     $out = $d;
     foreach (array('feePercent', 'feeFixed', 'cardHashKey') as $k) if (isset($s[$k])) $out[$k] = $s[$k];
-    foreach (array('notifications', 'captcha', 'maps') as $k) {
+    foreach (array('notifications', 'captcha', 'maps', 'preloader') as $k) {
       if (isset($s[$k]) && is_array($s[$k])) $out[$k] = array_merge($d[$k], $s[$k]);
     }
     $out['notifications']['adminAlerts'] = array_merge($d['notifications']['adminAlerts'], isset($s['notifications']['adminAlerts']) && is_array($s['notifications']['adminAlerts']) ? $s['notifications']['adminAlerts'] : array());

@@ -138,6 +138,7 @@ function migrate() {
     weatherPlace: 'Nassau, Bahamas', weatherLat: 25.0582, weatherLng: -77.3431,
     ...(db.settings.maps || {}),
   };
+  db.settings.preloader = { enabled: true, icon: 'logo', customUrl: '', size: 56, animation: 'pulse', speed: 'normal', background: 'page', ...(db.settings.preloader || {}) };
   for (const u of db.users) u.phone ??= '';
   for (const o of db.orders) {
     o.key ||= crypto.randomBytes(12).toString('hex'); o.buyerPhone ??= '';
@@ -762,6 +763,7 @@ route('GET', '/api/meta', () => {
     categories: CATEGORIES, feePercent: db.settings.feePercent, feeFixed: db.settings.feeFixed,
     maps: { googleMapsKey: m.googleMapsKey, center: { lat: m.weatherLat, lng: m.weatherLng } },
     captcha: captchaPublic(),
+    preloader: db.settings.preloader,
     weatherPlace: { name: m.weatherPlace, lat: m.weatherLat, lng: m.weatherLng },
   };
 });
@@ -1508,14 +1510,47 @@ route('POST', '/api/admin/orders/:id/refund', ({ req, params }) => {
   return { order: adminOrder(o) };
 });
 
+// ---------- preloader (small icon shown while pages open) ----------
+const PRE_ICONS = ['logo', 'ticket', 'vinyl', 'ring', 'music', 'star', 'bolt', 'heart', 'custom'];
+const PRE_ANIMS = ['spin', 'pulse', 'rumble', 'flash', 'bounce', 'flip', 'still'];
+const PRE_SPEEDS = ['slow', 'normal', 'fast'];
+const PRE_BGS = ['page', 'dim', 'clear'];
+function preloaderHtml() {
+  const p = db.settings.preloader;
+  if (!p || !p.enabled) return '';
+  const src = p.icon === 'custom' && p.customUrl ? p.customUrl : (p.icon === 'logo' || p.icon === 'custom') ? '/favicon.png' : `/preloader/${p.icon}.svg`;
+  const size = Math.min(160, Math.max(24, Math.round(p.size) || 56));
+  return `<div class="tj-root tj-pre-host"><div id="tjPre" class="tj-pre pre-${p.animation} pre-speed-${p.speed} pre-bg-${p.background}" style="--pre-size:${size}px" role="status" aria-label="Loading"><img src="${src.replace(/"/g, '')}" alt="" width="${size}" height="${size}" /></div></div><script>setTimeout(function(){var p=document.getElementById('tjPre');if(p)p.classList.add('done')},8000)</script>`;
+}
+
 const SECRET_KEYS = ['resendApiKey', 'twilioToken'];
 function settingsView() {
   const n = { ...N() };
   for (const k of SECRET_KEYS) n[k] = n[k] ? '••••' + n[k].slice(-4) : '';
-  return { feePercent: db.settings.feePercent, feeFixed: db.settings.feeFixed, notifications: n, maps: db.settings.maps, captcha: { ...db.settings.captcha, secretKey: db.settings.captcha.secretKey ? '••••' + db.settings.captcha.secretKey.slice(-4) : '', testKeys: db.settings.captcha.siteKey === RECAPTCHA_TEST_SITE }, defaultAdminRecipients: activeAdmins().map((u) => u.email) };
+  return { feePercent: db.settings.feePercent, feeFixed: db.settings.feeFixed, notifications: n, maps: db.settings.maps, preloader: db.settings.preloader, captcha: { ...db.settings.captcha, secretKey: db.settings.captcha.secretKey ? '••••' + db.settings.captcha.secretKey.slice(-4) : '', testKeys: db.settings.captcha.siteKey === RECAPTCHA_TEST_SITE }, defaultAdminRecipients: activeAdmins().map((u) => u.email) };
 }
 
 route('GET', '/api/admin/settings', ({ req }) => { requireAdmin(req); return { settings: settingsView() }; });
+
+route('PUT', '/api/admin/preloader', ({ req, body }) => {
+  requireAdmin(req);
+  const p = { ...db.settings.preloader };
+  if (body.enabled !== undefined) p.enabled = !!body.enabled;
+  if (body.icon !== undefined) { if (!PRE_ICONS.includes(body.icon)) fail(400, 'Pick one of the preloader icons'); p.icon = body.icon; }
+  if (body.customUrl !== undefined) {
+    const u = String(body.customUrl || '').trim();
+    if (u && !/^\/uploads\/[\w-]+\.(png|jpe?g|webp|gif)$/.test(u)) fail(400, 'Upload your preloader icon with the Upload button');
+    p.customUrl = u;
+  }
+  if (body.size !== undefined) { const n = Number(body.size); if (!Number.isInteger(n) || n < 24 || n > 160) fail(400, 'Icon size must be between 24 and 160 pixels'); p.size = n; }
+  if (body.animation !== undefined) { if (!PRE_ANIMS.includes(body.animation)) fail(400, 'Pick one of the animations'); p.animation = body.animation; }
+  if (body.speed !== undefined) { if (!PRE_SPEEDS.includes(body.speed)) fail(400, 'Pick a speed'); p.speed = body.speed; }
+  if (body.background !== undefined) { if (!PRE_BGS.includes(body.background)) fail(400, 'Pick a background'); p.background = body.background; }
+  if (p.icon === 'custom' && !p.customUrl) fail(400, 'Upload your own icon first, or pick one of the built-in icons');
+  db.settings.preloader = p;
+  saveDb();
+  return { settings: settingsView() };
+});
 
 route('PUT', '/api/admin/captcha', ({ req, body }) => {
   requireAdmin(req);
@@ -1995,14 +2030,18 @@ function serveStatic(req, res, pathname, search = '') {
   const cache = ext === '.html' ? 'no-cache' : versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=86400, stale-while-revalidate=604800';
   const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache, 'ETag': e.etag, ...SECURITY_HEADERS };
   if (COMPRESSIBLE.has(ext)) headers['Vary'] = 'Accept-Encoding';
-  if (req.headers['if-none-match'] === e.etag) { res.writeHead(304, headers); return res.end(); }
+  // The page includes the preloader settings, so its version tag changes when they change.
+  const preHtml = ext === '.html' && e.data.includes('__PRELOADER__') ? preloaderHtml() : null;
+  if (preHtml !== null) headers['ETag'] = e.etag.slice(0, -1) + '-' + crypto.createHash('sha1').update(preHtml).digest('base64url').slice(0, 8) + '"';
+  if (req.headers['if-none-match'] === headers['ETag']) { res.writeHead(304, headers); return res.end(); }
   let body = e.data;
   if (ext === '.html' && e.data.includes('__ORIGIN__')) {
     // Social media previews need full web addresses, so fill in this site's address.
     const origin = requestOrigin(req);
     e.byOrigin ||= new Map();
-    let o = e.byOrigin.get(origin);
-    if (!o) { o = { data: Buffer.from(e.data.toString('utf8').split('__ORIGIN__').join(origin)) }; if (e.byOrigin.size > 20) e.byOrigin.clear(); e.byOrigin.set(origin, o); }
+    const key = origin + '\n' + (preHtml || '');
+    let o = e.byOrigin.get(key);
+    if (!o) { o = { data: Buffer.from(e.data.toString('utf8').split('__ORIGIN__').join(origin).split('__PRELOADER__').join(preHtml || '')) }; if (e.byOrigin.size > 20) e.byOrigin.clear(); e.byOrigin.set(key, o); }
     const enc2 = pickEncoding(req);
     if (enc2) { o[enc2] ||= compress(o.data, enc2); body = o[enc2]; headers['Content-Encoding'] = enc2; } else body = o.data;
     headers['Content-Length'] = body.length;

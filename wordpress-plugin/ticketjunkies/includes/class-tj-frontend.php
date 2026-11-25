@@ -54,6 +54,8 @@ final class TJ_Frontend {
       wp_safe_redirect(in_array('tj_organizer', (array) $u->roles, true) ? tj_route_url('#/dashboard') : tj_route_url('#/tickets'));
       exit;
     });
+    add_action('wp_body_open', [__CLASS__, 'preloader'], 1);
+    add_action('wp_footer', [__CLASS__, 'preloader_fallback'], 1);
     $ui = self::ui();
     if ($ui['header'] || $ui['footer']) add_filter('hello_elementor_header_footer', '__return_false');
     if ($ui['header']) add_action('wp_body_open', [__CLASS__, 'header'], 5);
@@ -80,6 +82,33 @@ final class TJ_Frontend {
         esc_attr(get_bloginfo('name')), esc_attr($title), esc_attr($desc), esc_url($url), esc_url($img), esc_attr($title), esc_attr($desc), esc_url($img));
     }
   }
+
+  /** Preloader: a small icon in the middle of the screen while a page opens (Admin → Settings → Preloader) */
+  private static $pre_done = false;
+  public static function preloader_markup($hidden = false) {
+    $s = TJ_Store::settings();
+    $p = $s['preloader'];
+    if (empty($p['enabled'])) return '';
+    $icon = (string) $p['icon'];
+    $src = ($icon === 'custom' && $p['customUrl'] !== '') ? $p['customUrl'] : (in_array($icon, array('logo', 'custom'), true) ? TJ_URL . 'assets/img/favicon.png' : TJ_URL . 'assets/img/preloader/' . sanitize_file_name($icon) . '.svg');
+    $size = max(24, min(160, (int) $p['size']));
+    $cls = 'tj-pre pre-' . sanitize_html_class($p['animation']) . ' pre-speed-' . sanitize_html_class($p['speed']) . ' pre-bg-' . sanitize_html_class($p['background']) . ($hidden ? ' done' : '');
+    $js = "(function(){var w=document.getElementById('tjPre');if(!w)return;var t0=Date.now(),tm=0;"
+      . "function hide(){clearTimeout(tm);tm=setTimeout(function(){w.classList.add('done')},Math.max(0,300-(Date.now()-t0)))}"
+      . "if(document.readyState==='complete')hide();else window.addEventListener('load',hide);"
+      . "setTimeout(function(){w.classList.add('done')},8000);"
+      . "window.addEventListener('pageshow',function(e){if(e.persisted)w.classList.add('done')});"
+      . "document.addEventListener('click',function(e){var a=e.target&&e.target.closest?e.target.closest('a[href]'):null;"
+      . "if(!a||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(a.target&&a.target!=='_self')||a.hasAttribute('download'))return;"
+      . "var u;try{u=new URL(a.href,location.href)}catch(x){return}"
+      . "if(u.origin!==location.origin||(u.pathname===location.pathname&&u.search===location.search))return;"
+      . "if(/\\/wp-(admin|login)|\\.(pdf|zip|csv|xlsx|docx|ics|png|jpe?g|gif|webp)$/i.test(u.pathname))return;"
+      . "setTimeout(function(){if(e.defaultPrevented)return;t0=Date.now();w.classList.remove('done');clearTimeout(tm);tm=setTimeout(function(){w.classList.add('done')},8000)},0)});})();";
+    return '<div class="tj-root tj-pre-host"><div id="tjPre" class="' . esc_attr($cls) . '" style="--pre-size:' . $size . 'px" role="status" aria-label="Loading"><img src="' . esc_url($src) . '" alt="" width="' . $size . '" height="' . $size . '" /></div></div><script>' . $js . "</script>\n";
+  }
+  public static function preloader() { if (self::$pre_done || self::is_editor()) return; self::$pre_done = true; echo self::preloader_markup(); }
+  /** Themes without wp_body_open: add it at the bottom (hidden) so link clicks still show it */
+  public static function preloader_fallback() { if (self::$pre_done || self::is_editor()) return; self::$pre_done = true; echo self::preloader_markup(true); }
 
   public static function is_editor() {
     if (!did_action('elementor/loaded')) return false;

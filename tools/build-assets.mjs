@@ -12,6 +12,8 @@ fs.mkdirSync(path.join(OUT, 'img', 'og'), { recursive: true });
 // ---------- images ----------
 for (const f of ['logo.png', 'favicon.png', 'apple-touch-icon.png']) fs.copyFileSync(path.join(SRC, f), path.join(OUT, 'img', f));
 for (const f of fs.readdirSync(path.join(SRC, 'og'))) fs.copyFileSync(path.join(SRC, 'og', f), path.join(OUT, 'img', 'og', f));
+fs.mkdirSync(path.join(OUT, 'img', 'preloader'), { recursive: true });
+for (const f of fs.readdirSync(path.join(SRC, 'preloader'))) fs.copyFileSync(path.join(SRC, 'preloader', f), path.join(OUT, 'img', 'preloader', f));
 
 // ---------- helpers ----------
 function patch(src, pairs, file) {
@@ -40,6 +42,7 @@ let app = fs.readFileSync(path.join(SRC, 'app.js'), 'utf8');
 const prelude = fs.readFileSync(path.join(here, 'wp-prelude.js'), 'utf8');
 const appendix = fs.readFileSync(path.join(here, 'wp-widgets.js'), 'utf8');
 app = patch(app, [
+  ["const preAsset = (f) => '/' + f;", "const preAsset = (f) => TJ.assets + 'img/' + f;"],
   ["const $app = document.getElementById('app');\nconst $nav = document.getElementById('nav');",
    "let $app = document.createElement('div');\nlet $nav = document.getElementById('nav') || document.createElement('nav');"],
   // REST base + WordPress nonce

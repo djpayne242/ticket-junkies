@@ -102,7 +102,8 @@ function toast(msg, isErr = false) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 3200);
 }
 const go = (hash) => tjGo(hash);
-const loading = () => { $app.innerHTML = '<div class="loading">Loading…</div>'; };
+const loadingHtml = () => (META.preloader && META.preloader.enabled ? '<div class="loading" aria-hidden="true"></div>' : '<div class="loading">Loading…</div>');
+const loading = () => { $app.innerHTML = loadingHtml(); };
 
 function cover(ev, cls = '') {
   if (ev.imageUrl) return `<div class="cover has-img ${cls}"><img class="cover-img" src="${esc(ev.imageUrl)}" alt="${esc(ev.title)}" ${cls === 'big' ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async" /></div>`;
@@ -455,10 +456,47 @@ function needLogin(role) {
   }
   return false;
 }
+// ---------- preloader (small icon in the middle of the screen while a page opens) ----------
+const preAsset = (f) => TJ.assets + 'img/' + f;
+function preIconUrl(p) { return p.icon === 'custom' && p.customUrl ? p.customUrl : (p.icon === 'logo' || p.icon === 'custom') ? preAsset('favicon.png') : preAsset('preloader/' + p.icon + '.svg'); }
+function preApply(el, p, extra = '') {
+  el.className = `tj-pre pre-${p.animation} pre-speed-${p.speed} pre-bg-${p.background}${extra}`;
+  el.style.setProperty('--pre-size', (Number(p.size) || 56) + 'px');
+  let img = el.querySelector('img');
+  if (!img) { img = document.createElement('img'); img.alt = ''; el.appendChild(img); }
+  const src = preIconUrl(p);
+  if (img.getAttribute('src') !== src) img.src = src;
+}
+let preTimer = 0, preShownAt = 0;
+function showPreloader(p = META.preloader, ms = 8000) {
+  if (!p || !p.enabled) return;
+  let el = document.getElementById('tjPre');
+  if (!el) {
+    const host = document.createElement('div'); host.className = 'tj-root tj-pre-host';
+    el = document.createElement('div'); el.id = 'tjPre'; el.setAttribute('role', 'status'); el.setAttribute('aria-label', 'Loading');
+    host.appendChild(el); document.body.appendChild(host);
+  }
+  preApply(el, p); preShownAt = Date.now();
+  clearTimeout(preTimer); preTimer = setTimeout(() => hidePreloader(0), ms);
+}
+function hidePreloader(minMs = 350) {
+  const el = document.getElementById('tjPre');
+  if (!el) return;
+  clearTimeout(preTimer);
+  const wait = preShownAt ? Math.max(0, minMs - (Date.now() - preShownAt)) : 0;
+  preTimer = setTimeout(() => { el.classList.add('done'); preShownAt = 0; }, wait);
+}
+let lastRoutePath = null;
 async function route() {
   if (!TJ_SCREEN) return;
   $app = TJ_SCREEN.el;
   if (!tjScreenAllows(tjCurrentRoute())) { location.href = tjRouteUrl(tjCurrentRoute()); return; }
+  const rp = parseHash().parts.join('/');
+  if (lastRoutePath !== null && rp !== lastRoutePath) showPreloader();
+  lastRoutePath = rp;
+  try { await routePage(); } finally { hidePreloader(); }
+}
+async function routePage() {
   $nav.classList.remove('open');
   renderNav();
   if (TJ_SCREEN.routed) TJ_SCREEN.el.scrollIntoView({ block: 'start' }); TJ_SCREEN.routed = true;
@@ -1674,7 +1712,7 @@ const bindRefunds = (after) => $app.querySelectorAll('[data-refund]').forEach((b
 async function pageAdmin(tab, sub, params) {
   if (tab === 'user' && sub) return adminUserDetail(sub);
   if (tab === 'users' && sub === 'new') return adminNewUser();
-  adminShell(tab, '<div class="loading">Loading…</div>');
+  adminShell(tab, loadingHtml());
   const body = document.getElementById('adminBody');
   const reload = () => pageAdmin(tab, sub, params);
 
@@ -1783,6 +1821,7 @@ async function pageAdmin(tab, sub, params) {
       </div>
       ${captchaSettingsHtml(settings)}
       ${mapsSettingsHtml(settings)}
+      ${preloaderSettingsHtml(settings)}
       ${notifSettingsHtml(settings)}
       <div class="form-card" style="max-width:620px;margin-top:20px">
         <h3>Your administrator account</h3>
@@ -1800,6 +1839,7 @@ async function pageAdmin(tab, sub, params) {
     bindNotifSettings();
     bindMapsSettings();
     bindCaptchaSettings();
+    bindPreloaderSettings(settings);
     return;
   }
 
@@ -2099,6 +2139,81 @@ function bindMapsSettings() {
     try { const r = await api('/api/admin/maps/locate-all', { method: 'POST' }); toast(r.checked ? `Located ${r.located} of ${r.checked} events` : 'All events already have a map pin'); }
     catch (err) { toast(err.message, true); }
     e.target.disabled = false; e.target.textContent = '📍 Locate events missing a map pin';
+  };
+}
+
+// ---------- preloader settings (admin) ----------
+const PRE_ICON_LIST = [['logo', 'TicketJunkies'], ['ticket', 'Ticket'], ['vinyl', 'Vinyl record'], ['ring', 'Ring'], ['music', 'Music'], ['star', 'Star'], ['bolt', 'Lightning'], ['heart', 'Heart']];
+const PRE_ANIM_LIST = [['spin', '🔄 Spin'], ['pulse', '💓 Pulse (grow & shrink)'], ['rumble', '📳 Rumble (shake)'], ['flash', '⚡ Flash (blink)'], ['bounce', '🏀 Bounce'], ['flip', '🪙 Flip'], ['still', '⏸️ Stand still']];
+const PRE_SPEED_LIST = [['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']];
+const PRE_BG_LIST = [['page', 'Cover the page while it loads'], ['dim', 'See-through dim'], ['clear', 'Icon only (no background)']];
+function preloaderSettingsHtml(settings) {
+  const p = settings.preloader;
+  const opt = (list, v) => list.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${l}</option>`).join('');
+  const tile = (k, label, src, extra = '') => `<label class="pre-tile"${extra}><input type="radio" name="icon" value="${k}" ${p.icon === k ? 'checked' : ''} /><span><img src="${esc(src)}" alt="" /><em>${label}</em></span></label>`;
+  return `
+  <div class="form-card" style="max-width:820px;margin-top:20px" id="preCard">
+    <h3>⏳ Preloader</h3>
+    <p class="muted small">A small icon that appears in the middle of the screen whenever a page opens or refreshes. There is no "Loading" text, just your icon. Pick a built-in icon or upload your own, then choose its size and how it moves.</p>
+    ${errBox('pErr')}
+    <form id="pf">
+      <label class="check"><input type="checkbox" name="enabled" ${p.enabled ? 'checked' : ''} /> Show the preloader when pages open or refresh</label>
+      <div class="field" style="margin-top:12px"><label>Icon</label>
+        <div class="pre-tiles">${PRE_ICON_LIST.map(([k, l]) => tile(k, l, preIconUrl({ ...p, icon: k }))).join('')}${tile('custom', 'My icon', p.customUrl || '', ` id="preCustomTile"${p.customUrl ? '' : ' hidden'}`)}</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <button type="button" class="btn btn-ghost btn-sm" id="preUpload">⬆️ Upload my own icon</button>
+          <input type="file" id="preFile" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+          <span class="muted small">A PNG with a see-through background looks best. Animated GIFs work too. Up to 2 MB.</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Size: <strong id="preSizeOut">${p.size}px</strong></label><input type="range" name="size" min="24" max="160" step="2" value="${p.size}" /></div>
+        <div class="field"><label>Animation</label><select name="animation">${opt(PRE_ANIM_LIST, p.animation)}</select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Speed</label><select name="speed">${opt(PRE_SPEED_LIST, p.speed)}</select></div>
+        <div class="field"><label>Background</label><select name="background">${opt(PRE_BG_LIST, p.background)}</select></div>
+      </div>
+      <div class="field"><label>Preview</label><div class="tj-pre pre-inline" id="prePreview"></div></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary">Save preloader</button>
+        <button type="button" class="btn btn-ghost" id="preTry">👀 Try it full screen</button>
+      </div>
+    </form>
+  </div>`;
+}
+function bindPreloaderSettings(settings) {
+  const f = document.getElementById('pf');
+  if (!f) return;
+  const el = (n) => f.elements.namedItem(n);
+  let customUrl = settings.preloader.customUrl || '';
+  const val = () => ({ enabled: el('enabled').checked, icon: (f.querySelector('input[name=icon]:checked') || {}).value || 'logo', customUrl, size: Number(el('size').value), animation: el('animation').value, speed: el('speed').value, background: el('background').value });
+  const prev = () => { const v = val(); document.getElementById('preSizeOut').textContent = v.size + 'px'; preApply(document.getElementById('prePreview'), v, ' pre-inline'); };
+  f.addEventListener('input', prev); f.addEventListener('change', prev); prev();
+  document.getElementById('preUpload').onclick = () => document.getElementById('preFile').click();
+  document.getElementById('preFile').onchange = (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) return toast('Please pick an image of 2 MB or less', true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        toast('Uploading icon…');
+        const { url } = await api('/api/upload', { method: 'POST', body: { dataUrl: reader.result } });
+        customUrl = url;
+        const t = document.getElementById('preCustomTile');
+        t.hidden = false; t.querySelector('img').src = url; t.querySelector('input').checked = true;
+        prev(); toast('Icon uploaded. Press "Save preloader" to use it.');
+      } catch (err) { toast(err.message, true); }
+    };
+    reader.readAsDataURL(file);
+  };
+  document.getElementById('preTry').onclick = () => showPreloader({ ...val(), enabled: true }, 2500);
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    try { const r = await api('/api/admin/preloader', { method: 'PUT', body: val() }); META.preloader = r.settings.preloader; toast('Preloader saved'); }
+    catch (err) { showErr('pErr', err.message); }
   };
 }
 
