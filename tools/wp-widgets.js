@@ -76,13 +76,63 @@ const TJ_WIDGETS = {
     if (o.showWeather !== false && place) TJGeo.homeWeather(el.querySelector('#homeWx'), place);
     if (o.showClock !== false) startHomeClock();
   },
+  // Orange & blue "Get your ticket fix." box with search, weather and live clock inside
+  hero(el, o) {
+    const { q, category } = tjHomeQuery();
+    const catOpts = META.categories.map((c) => `<option ${c === category ? 'selected' : ''}>${esc(c)}</option>`).join('');
+    const side = o.showWeather === false && o.showClock === false ? '' : `<div class="hero-side">
+        ${o.showWeather === false ? '' : '<div class="wx-mini hidden" id="homeWx"></div>'}
+        ${o.showClock === false ? '' : `<div class="hero-clock" id="homeClock" aria-live="off">
+          <div class="hc-time"><span id="hcTime">--:--</span><span class="hc-sec" id="hcSec"></span><span class="hc-ampm" id="hcAmpm"></span></div>
+          <div class="hc-date" id="hcDate"></div><div class="hc-zone" id="hcZone"></div></div>`}</div>`;
+    const cta = o.showCta === false ? '' : (me?.role === 'organizer'
+      ? '<a class="btn btn-green" href="#/create">+ Create an event</a>'
+      : `<span>${esc(o.ctaText || 'Hosting an event?')}</span><a class="link" href="#/register?role=organizer">${esc(o.ctaLink || 'Become an organizer →')}</a>`);
+    el.innerHTML = `<section class="hero tj-hero${side ? '' : ' no-side'}">${side}
+      <h1 class="display">${esc(o.title || 'Get your ticket fix.')}</h1>
+      ${o.subtitle === '' ? '' : `<p>${esc(o.subtitle || 'Discover the hottest parties, concerts, comedy shows and festivals — or launch your own event and start selling tickets in minutes.')}</p>`}
+      <form class="search" role="search">
+        <input name="q" placeholder="${esc(o.placeholder || 'Search events, venues, organizers…')}" value="${esc(q)}" />
+        <select name="category"><option value="">All categories</option>${catOpts}</select>
+        <button class="btn btn-primary">${esc(o.button || 'Search')}</button>
+      </form>
+      ${cta ? `<div class="hero-cta">${cta}</div>` : ''}
+    </section>`;
+    el.querySelector('form').onsubmit = (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      location.href = tjHomeUrl({ q: f.get('q') || '', category: f.get('category') || '' });
+    };
+    const place = META.weatherPlace;
+    if (o.showWeather !== false && place) TJGeo.homeWeather(el.querySelector('#homeWx'), place);
+    if (o.showClock !== false) startHomeClock();
+  },
   cta(el, o) {
     if (me?.role === 'organizer' && o.hideForOrganizers !== false) { el.innerHTML = '<a class="btn btn-green" href="#/create">+ Create an event</a>'; return; }
     el.innerHTML = `<div class="hero-cta"><span>${esc(o.text || 'Hosting an event?')}</span><a class="link" href="#/register?role=organizer">${esc(o.link || 'Become an organizer →')}</a></div>`;
   },
 };
 
+// A page with the separate search + weather blocks but no hero box gets the
+// orange & blue "Get your ticket fix." box back automatically (search, weather and
+// clock move inside it). Turn off with: add_filter('tj_auto_hero', '__return_false');
+function tjAutoHero(root) {
+  if (!window.TJ_CONFIG || TJ_CONFIG.autoHero === false || !root.querySelectorAll) return;
+  if (document.querySelector('[data-tj-widget="hero"], .tj-hero-box')) return;
+  const search = root.querySelector('[data-tj-widget="search"]:not([data-tj-mounted])');
+  if (!search) return;
+  const weather = [...root.querySelectorAll('[data-tj-widget="weather"]:not([data-tj-mounted])')];
+  const so = tjOpts(search);
+  search.setAttribute('data-tj-widget', 'hero');
+  search.setAttribute('data-tj-opts', JSON.stringify({ placeholder: so.placeholder, button: so.button, showWeather: weather.length ? undefined : false, showClock: weather.length ? undefined : false }));
+  for (const w of weather) {
+    w.dataset.tjMounted = '1'; w.style.display = 'none'; w.innerHTML = '';
+    const br = w.nextSibling; if (br && br.nodeName === 'BR') br.remove();
+  }
+}
+
 function tjMountAll(root) {
+  tjAutoHero(root);
   const els = [...(root.querySelectorAll ? root.querySelectorAll('[data-tj-widget]') : [])];
   // screens first so links on the same page are recognised
   els.sort((a, b) => (a.dataset.tjWidget === 'screen' ? -1 : 0) - (b.dataset.tjWidget === 'screen' ? -1 : 0));

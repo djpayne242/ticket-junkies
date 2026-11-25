@@ -379,6 +379,48 @@ class TJ_Store {
     return $ids ? (int) $ids[0] : 0;
   }
 
+  // ---------- owner's events shipped with the plugin (assets/seed/events.json) ----------
+  // Each bundled event is added once if it is missing. If you delete it later it stays deleted.
+  public static function restore_bundled_events() {
+    $file = TJ_DIR . 'assets/seed/events.json';
+    if (!file_exists($file)) return;
+    $done = get_option('tj_bundled_events');
+    if (!is_array($done)) $done = array();
+    $list = json_decode((string) file_get_contents($file), true);
+    if (!is_array($list)) return;
+    $todo = array();
+    foreach ($list as $e) if (!empty($e['id']) && empty($done[$e['id']])) $todo[] = $e;
+    if (!$todo) return;
+    if (get_transient('tj_restoring_events')) return;
+    set_transient('tj_restoring_events', 1, 120);
+    $owner = 0;
+    foreach (array('djpayne242@gmail.com') as $em) { $u = get_user_by('email', $em); if ($u) { $owner = (int) $u->ID; break; } }
+    if (!$owner) $owner = (int) self::first_admin_id();
+    if (!$owner) { delete_transient('tj_restoring_events'); return; }
+    foreach ($todo as $e) {
+      $id = $e['id'];
+      $same_title = false;
+      foreach (self::events() as $x) if (strcasecmp(trim($x['title']), trim($e['title'])) === 0) $same_title = true;
+      if (!self::event_exists($id) && !$same_title) {
+        $e['organizerId'] = $owner;
+        foreach (array('imageUrl', 'imageShareUrl') as $k) {
+          if (empty($e[$k])) continue;
+          $src = TJ_DIR . 'assets/seed/' . basename($e[$k]);
+          $e[$k] = file_exists($src) && class_exists('TJ_Rest') ? TJ_Rest::save_upload(basename($e[$k]), file_get_contents($src), $e['title']) : '';
+        }
+        if (empty($e['imageUrl'])) $e['imageShareUrl'] = '';
+        foreach ($e['tiers'] as &$t) $t['sold'] = 0;
+        unset($t);
+        $e['updatedAt'] = gmdate('Y-m-d\TH:i:s') . '.000Z';
+        self::save_event($e);
+        if (class_exists('TJ_Directory')) TJ_Directory::sync_event($e, self::user_by_id($owner));
+      }
+      $done[$id] = gmdate('c');
+    }
+    update_option('tj_bundled_events', $done, false);
+    delete_transient('tj_restoring_events');
+  }
+
   // ---------- sample events (only for an empty site) ----------
   public static function seed() {
     global $wpdb;

@@ -163,6 +163,23 @@ class TJ_W_Weather extends TJ_Widget_Base { protected $tj_type = 'weather';
   }
   protected function tj_opts(array $s) { return ['showWeather' => ($s['show_weather'] ?? 'yes') === 'yes', 'showClock' => ($s['show_clock'] ?? 'yes') === 'yes']; }
 }
+class TJ_W_Hero extends TJ_Widget_Base { protected $tj_type = 'hero';
+  public function get_name() { return 'tj_hero'; } public function get_title() { return 'TJ Hero Box ("Get your ticket fix.")'; } public function get_icon() { return 'eicon-banner'; }
+  protected function tj_content_controls() {
+    $this->add_control('title', ['label' => 'Headline', 'type' => Controls_Manager::TEXT, 'default' => 'Get your ticket fix.']);
+    $this->add_control('subtitle', ['label' => 'Text', 'type' => Controls_Manager::TEXTAREA, 'default' => 'Discover the hottest parties, concerts, comedy shows and festivals — or launch your own event and start selling tickets in minutes.']);
+    $this->add_control('show_weather', ['label' => 'Weather forecast', 'type' => Controls_Manager::SWITCHER, 'default' => 'yes']);
+    $this->add_control('show_clock', ['label' => 'Live clock', 'type' => Controls_Manager::SWITCHER, 'default' => 'yes']);
+    $this->add_control('show_cta', ['label' => '"Become an organizer" link', 'type' => Controls_Manager::SWITCHER, 'default' => 'yes']);
+  }
+  protected function tj_extra_style_controls() {
+    $this->start_controls_section('tj_hero_bg', ['label' => 'Box', 'tab' => Controls_Manager::TAB_STYLE]);
+    $this->add_control('hero_bg', ['label' => 'Background (leave empty for orange & blue)', 'type' => Controls_Manager::COLOR, 'selectors' => ['{{WRAPPER}} .hero.tj-hero' => 'background: {{VALUE}};']]);
+    $this->add_control('hero_text', ['label' => 'Text color', 'type' => Controls_Manager::COLOR, 'selectors' => ['{{WRAPPER}} .hero.tj-hero, {{WRAPPER}} .hero.tj-hero h1, {{WRAPPER}} .hero.tj-hero p, {{WRAPPER}} .hero-cta a.link' => 'color: {{VALUE}};']]);
+    $this->end_controls_section();
+  }
+  protected function tj_opts(array $s) { return ['title' => $s['title'] ?? '', 'subtitle' => $s['subtitle'] ?? null, 'showWeather' => ($s['show_weather'] ?? 'yes') === 'yes', 'showClock' => ($s['show_clock'] ?? 'yes') === 'yes', 'showCta' => ($s['show_cta'] ?? 'yes') === 'yes']; }
+}
 class TJ_W_Cta extends TJ_Widget_Base { protected $tj_type = 'cta';
   public function get_name() { return 'tj_cta'; } public function get_title() { return 'TJ "Become an Organizer" Link'; } public function get_icon() { return 'eicon-call-to-action'; }
   protected function tj_content_controls() {
@@ -179,5 +196,5 @@ class TJ_W_Cta extends TJ_Widget_Base { protected $tj_type = 'cta';
 }
 
 function tj_elementor_widget_classes() {
-  return ['TJ_W_Search', 'TJ_W_Weather', 'TJ_W_Cta', 'TJ_W_Chips', 'TJ_W_Map', 'TJ_W_Grid', 'TJ_W_Event', 'TJ_W_Checkout', 'TJ_W_Tickets', 'TJ_W_Organizer', 'TJ_W_Admin', 'TJ_W_Login', 'TJ_W_Register', 'TJ_W_Ticket', 'TJ_W_Home'];
+  return ['TJ_W_Hero', 'TJ_W_Search', 'TJ_W_Weather', 'TJ_W_Cta', 'TJ_W_Chips', 'TJ_W_Map', 'TJ_W_Grid', 'TJ_W_Event', 'TJ_W_Checkout', 'TJ_W_Tickets', 'TJ_W_Organizer', 'TJ_W_Admin', 'TJ_W_Login', 'TJ_W_Register', 'TJ_W_Ticket', 'TJ_W_Home'];
 }

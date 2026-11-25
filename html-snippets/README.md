@@ -9,6 +9,7 @@ The plugin already creates all of these pages for you. Use the snippets only whe
 
 | File | What it shows |
 |---|---|
+| `00-hero-box.html` | Orange & blue "Get your ticket fix." box with search, weather and clock inside |
 | `01-homepage-complete.html` | Complete homepage (hero, search, weather & clock, categories, map, event grid) |
 | `02-search-bar.html` | Search bar |
 | `03-weather-and-clock.html` | Weather & live clock |

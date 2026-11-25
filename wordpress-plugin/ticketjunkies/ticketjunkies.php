@@ -2,7 +2,7 @@
 /**
  * Plugin Name: TicketJunkies – Event Ticketing for Elementor
  * Description: Complete event ticketing (events, ticket types, checkout, QR tickets, organizer & attendee dashboards, reports, admin panel) with drag-and-drop Elementor widgets.
- * Version: 1.1.0
+ * Version: 1.1.1
  * Author: Dj Payne Events
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -12,7 +12,7 @@
  */
 if (!defined('ABSPATH')) exit;
 
-define('TJ_VERSION', '1.1.0');
+define('TJ_VERSION', '1.1.1');
 define('TJ_FILE', __FILE__);
 define('TJ_DIR', plugin_dir_path(__FILE__));
 define('TJ_URL', plugin_dir_url(__FILE__));
@@ -37,4 +37,5 @@ add_action('plugins_loaded', function () {
   if (class_exists('TJ_Elementor')) TJ_Elementor::init();
   if (class_exists('TJ_Admin')) TJ_Admin::init();
   if (class_exists('TJ_Updater')) TJ_Updater::init();
+  if (class_exists('TJ_Store')) add_action('init', ['TJ_Store', 'restore_bundled_events'], 20);
 });

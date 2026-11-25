@@ -94,6 +94,7 @@ final class TJ_Frontend {
       'rest' => esc_url_raw(rest_url('tj/v1/')), 'nonce' => wp_create_nonce('wp_rest'), 'home' => home_url('/'),
       'assets' => TJ_URL . 'assets/', 'pages' => $pages, 'editor' => self::is_editor(),
       'lostPassword' => wp_lostpassword_url(tj_page_url('login')),
+      'autoHero' => (bool) apply_filters('tj_auto_hero', true),
     ];
     if ($cfg['editor']) {
       $r = rest_do_request(new WP_REST_Request('GET', '/tj/v1/events'));
