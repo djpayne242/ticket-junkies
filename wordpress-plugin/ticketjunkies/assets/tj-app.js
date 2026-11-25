@@ -765,7 +765,8 @@ async function pageEvent(id) {
           ${t.description ? `<div class="tier-desc">${esc(t.description)}</div>` : ''}
           <div class="small">${tierKindOf(t) === 'donation' ? `<span class="kind-badge donation">💝 Donation</span> ${t.price > 0 ? 'Minimum ' + money(t.price) : 'Pay what you want'}` : tierKindOf(t) === 'free' || t.price === 0 ? '<span class="kind-badge free">🎁 Free</span>' : `<strong>${money(t.price)}</strong> <span class="muted">+ ${money(t.fee)} fee</span>`}</div>
           <div class="muted small">On sale ${esc(fmtLong(t.salesStart))}${t.salesEnd ? ` · until ${esc(fmtLong(t.salesEnd))}` : ''}</div></div>
-        <span class="cd-chip sale" data-cd-kind="sale" data-cd="${esc(t.salesStart)}" data-cd-end="${esc(ev.endsAt)}">🕒 <span class="cd-txt">…</span></span>
+        <span class="badge soon">Coming soon</span>
+        <div class="tier-cd"><span class="cd-chip sale" data-cd-kind="sale" data-cd="${esc(t.salesStart)}" data-cd-end="${esc(ev.endsAt)}">🕒 <span class="cd-txt">…</span></span></div>
       </div>`;
       if (tierSaleState(t) === 'closed') return `<div class="tier tier-closed">
         <div><div class="tier-name">${esc(t.name)}</div>
@@ -783,8 +784,9 @@ async function pageEvent(id) {
             : tierKindOf(t) === 'free' || t.price === 0 ? '<span class="kind-badge free">🎁 Free</span>' : `<strong>${money(t.price)}</strong> <span class="muted">+ ${money(t.fee)} fee</span>`}</div>
           ${tierKindOf(t) === 'donation' && qty[t.id] > 0 ? `<label class="don-amt"><span>Your donation per ticket</span><span class="don-in">$<input type="number" inputmode="decimal" min="${t.price}" step="0.01" data-amt="${esc(t.id)}" value="${esc(amt[t.id])}" /></span></label>${amtOk(t) ? '' : `<div class="error small" style="margin:6px 0 0">Minimum is ${money(t.price)}</div>`}` : ''}
           <div class="muted small">${t.remaining > 0 ? (t.remaining <= 20 ? `Only ${t.remaining} left!` : 'Available') : 'Sold out'}${salesWindowText(t) ? ' · ' + esc(salesWindowText(t)) : ''}</div>
-          ${t.salesEnd && t.remaining > 0 && buyable ? `<span class="cd-chip sale-end" data-cd-kind="saleEnd" data-cd="${esc(t.salesEnd)}" data-cd-end="${esc(t.salesEnd)}">⌛ <span class="cd-txt">…</span></span>` : ''}</div>
+          </div>
         ${t.remaining > 0 && buyable ? `<select data-tier="${esc(t.id)}">${opts}</select>` : '<span class="badge soldout">Sold out</span>'}
+        ${t.salesEnd && t.remaining > 0 && buyable ? `<div class="tier-cd"><span class="cd-chip sale-end" data-cd-kind="saleEnd" data-cd="${esc(t.salesEnd)}" data-cd-end="${esc(t.salesEnd)}">⌛ <span class="cd-txt">…</span></span></div>` : ''}
       </div>`;
     }).join('');
     const tt = totals();

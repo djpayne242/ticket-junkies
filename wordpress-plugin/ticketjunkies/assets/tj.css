@@ -1064,6 +1064,13 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .tj-root .cd-chip.sale-end.is-live { color: var(--muted); background: var(--chip, rgba(0,0,0,.06)); }
 .tj-root .tier.tier-closed { opacity: .6; }
 
+/* ticket countdowns: their own full-width line at the bottom of each ticket, a bit bigger */
+.tj-root .tier { flex-wrap: wrap; }
+.tj-root .tier > div:first-child { flex: 1 1 0; min-width: 0; }
+.tj-root .tier-cd { flex: 0 0 100%; order: 99; margin-top: 2px; }
+.tj-root .tier-cd .cd-chip { display: flex; justify-content: center; width: 100%; box-sizing: border-box; margin: 0; padding: 9px 14px; border-radius: 12px; font-size: 1.02rem; letter-spacing: .2px; }
+@media (max-width: 640px) { .tj-root .tier-cd .cd-chip { font-size: .98rem; padding: 8px 10px; } }
+
 
 /* =========================================================
    WordPress / Elementor integration
