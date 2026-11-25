@@ -961,6 +961,13 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 }
 @media print { .tj-root .info-bar { display: none; } }
 
+/* search: Category · Organizer · Venue · Date in one row */
+.tj-root .search-adv .sf-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.tj-root .search-adv .sf-date input[type=date] { min-height: 26px; cursor: pointer; }
+.tj-root .search-adv .sf-date input[type=date]::-webkit-date-and-time-value { text-align: left; }
+@media (max-width: 860px) { .tj-root .search-adv .sf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 360px) { .tj-root .search-adv .sf-grid { grid-template-columns: 1fr; } }
+
 
 /* =========================================================
    WordPress / Elementor integration

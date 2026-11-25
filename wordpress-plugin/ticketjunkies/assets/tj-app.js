@@ -430,6 +430,7 @@ function searchFormHtml(v, o = {}) {
       ${o.showCategory === false ? '' : sel('category', 'Category', 'All categories', META.categories, v.category)}
       ${sel('organizer', 'Organizer', 'All organizers', keep([], v.organizer), v.organizer)}
       ${sel('venue', 'Venue', 'All venues', keep([], v.venue), v.venue)}
+      <label class="sf sf-date"><span>Date</span><input type="date" name="date" value="${esc(v.date)}" min="${esc(todayLocalIso())}" aria-label="Event date" /></label>
     </div>
     <div class="sf-foot ${searchActive(v) ? '' : 'hidden'}"><a href="#" class="sf-clear">✕ Clear search</a></div>
   </form>`;
@@ -444,6 +445,9 @@ function wireSearchForm(form, v, onGo) {
   form.onsubmit = (e) => { e.preventDefault(); submit(); };
   // dropdowns search straight away; the keyword box waits for Enter / Search
   form.querySelectorAll('select, input[type=date]').forEach((x) => x.addEventListener('change', submit));
+  // the date box also searches once a full date has been typed
+  const dt = form.querySelector('input[type=date]');
+  if (dt) { let last = dt.value; dt.addEventListener('input', () => { if (dt.value !== last && (dt.value === '' || /^\d{4}-\d{2}-\d{2}$/.test(dt.value))) { last = dt.value; submit(); } }); dt.addEventListener('change', () => { last = dt.value; }); }
   const clr = form.querySelector('.sf-clear');
   if (clr) clr.onclick = (e) => { e.preventDefault(); onGo(new URLSearchParams()); };
   searchOptions().then((opts) => {
@@ -457,6 +461,7 @@ function wireSearchForm(form, v, onGo) {
   });
 }
 function norm(x) { return String(x || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+function todayLocalIso() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 
 // ---------- slim clock & weather bar (sits above the orange & blue box) ----------
 function infoBarHtml(o = {}) {
