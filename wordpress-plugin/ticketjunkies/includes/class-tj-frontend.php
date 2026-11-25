@@ -187,9 +187,8 @@ final class TJ_Frontend {
       self::w('text-editor', ['editor' => '<p>Discover the hottest parties, concerts, comedy shows and festivals — or launch your own event and start selling tickets in minutes.</p>', 'text_color' => '#FFFFFF', 'typography_typography' => 'custom', 'typography_font_size' => ['unit' => 'px', 'size' => 18]]),
       self::w('tj_search', []),
       self::w('tj_cta', ['_element_custom_width' => ['unit' => '%', 'size' => 100]]),
-    ], ['content_width' => 'full', 'width' => ['unit' => '%', 'size' => 62], 'width_tablet' => ['unit' => '%', 'size' => 100], 'flex_gap' => ['unit' => 'px', 'size' => 16, 'column' => '16', 'row' => '16'], 'padding' => self::px(0)], true);
-    $hero_right = self::c([self::w('tj_weather', [])], ['content_width' => 'full', 'width' => ['unit' => 'px', 'size' => 300], 'width_tablet' => ['unit' => '%', 'size' => 100], 'padding' => self::px(0)], true);
-    $hero = self::c([$hero_left, $hero_right], [
+    ], ['content_width' => 'full', 'width' => ['unit' => '%', 'size' => 100], 'width_tablet' => ['unit' => '%', 'size' => 100], 'flex_gap' => ['unit' => 'px', 'size' => 16, 'column' => '16', 'row' => '16'], 'padding' => self::px(0)], true);
+    $hero = self::c([$hero_left], [
       'content_width' => 'full', 'flex_direction' => 'row', 'flex_direction_tablet' => 'column', 'flex_justify_content' => 'space-between', 'flex_align_items' => 'flex-start', 'flex_wrap' => 'nowrap',
       'flex_gap' => ['unit' => 'px', 'size' => 30, 'column' => '30', 'row' => '24'],
       'background_background' => 'gradient', 'background_color' => '#376EB8', 'background_color_b' => '#EB742A', 'background_gradient_angle' => ['unit' => 'deg', 'size' => 135],
@@ -204,6 +203,7 @@ final class TJ_Frontend {
       self::w('button', ['text' => "Start selling — it's free", 'link' => ['url' => tj_route_url('#/register?role=organizer'), 'is_external' => '', 'nofollow' => ''], 'background_color' => '#EB742A', 'border_radius' => self::px(12), 'typography_typography' => 'custom', 'typography_font_weight' => '700']),
     ], ['content_width' => 'full', 'flex_direction' => 'row', 'flex_direction_mobile' => 'column', 'flex_justify_content' => 'space-between', 'flex_align_items' => 'center', 'background_background' => 'classic', 'background_color' => '#FFFFFF', 'border_radius' => self::px(18), 'padding' => self::px(30, 34), 'margin' => self::px(30, 0, 0, 0), 'box_shadow_box_shadow_type' => 'yes', 'box_shadow_box_shadow' => ['horizontal' => 0, 'vertical' => 6, 'blur' => 24, 'spread' => 0, 'color' => 'rgba(20,30,60,0.08)']], true);
     return [self::c([
+      self::w('tj_weather', []),
       $hero,
       self::w('tj_chips', []),
       self::w('tj_map', []),

@@ -919,6 +919,48 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 }
 @media print { .tj-root .cal-section { display: none; } }
 
+/* ---------- slim clock & weather bar above the hero box ---------- */
+.tj-root .info-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px 18px; flex-wrap: wrap; min-height: 50px; padding: 7px 16px; margin: 0 0 14px; border: 1px solid transparent; border-radius: 14px; color: var(--ink);
+  background: linear-gradient(var(--card), var(--card)) padding-box, linear-gradient(90deg, var(--orange, #eb742a), var(--blue)) border-box; box-shadow: var(--shadow); }
+.tj-root .info-bar .hero-clock { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; position: static; width: auto; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; color: var(--ink); text-align: left; }
+.tj-root .info-bar .hc-time { font-size: 1.3rem; font-weight: 800; line-height: 1; letter-spacing: .3px; font-variant-numeric: tabular-nums; color: var(--blue); white-space: nowrap; }
+.tj-root .info-bar .hc-sec { font-size: .85rem; } .tj-root .info-bar .hc-ampm { font-size: .85rem; }
+.tj-root .info-bar .hc-date { margin: 0; font-size: .92rem; font-weight: 600; white-space: nowrap; }
+.tj-root .info-bar .hc-zone { margin: 0; font-size: .72rem; font-weight: 700; color: var(--muted); opacity: 1; padding: 2px 7px; border-radius: 99px; background: var(--chip, rgba(0,0,0,.05)); }
+.tj-root .info-bar .wx-mini { display: flex; align-items: center; gap: 14px; position: static; min-width: 0; width: auto; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; color: var(--ink); }
+.tj-root .info-bar .wx-mini.hidden { display: none; }
+.tj-root .info-bar .wx-mini-now { gap: 6px; }
+.tj-root .info-bar .wx-mini-now > div { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.tj-root .info-bar .wx-mini-icon { font-size: 1.35rem; line-height: 1; }
+.tj-root .info-bar .wx-mini-temp { font-size: 1.1rem; }
+.tj-root .info-bar .wx-mini-place { font-size: .85rem; color: var(--muted); opacity: 1; }
+.tj-root .info-bar .wx-mini-days { display: flex; gap: 12px; margin: 0; padding: 0 0 0 14px; border-top: 0; border-left: 1px solid var(--line); }
+.tj-root .info-bar .wx-mini-day { display: flex; align-items: center; gap: 3px; font-size: .78rem; white-space: nowrap; }
+.tj-root .info-bar .wx-mini-day > span:first-child { font-weight: 700; color: var(--muted); }
+.tj-root .info-bar .wx-mini-day b { font-size: 1rem; line-height: 1; font-weight: 400; display: inline-block; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.tj-root .info-bar .wx-mini-day small { color: var(--muted); opacity: 1; }
+/* one slim line on wide screens: forecast days that don't fit drop out whole */
+@media (min-width: 861px) {
+  .tj-root .info-bar { flex-wrap: nowrap; }
+  .tj-root .info-bar .hero-clock, .tj-root .info-bar .wx-mini-now { flex: none; }
+  .tj-root .info-bar .wx-mini { flex: 0 1 auto; min-width: 0; }
+  .tj-root .info-bar .wx-mini-days { min-width: 0; flex-wrap: wrap; align-items: center; height: 30px; overflow: hidden; }
+  .tj-root .info-bar .wx-mini-day { height: 30px; line-height: 1; flex: none; }
+  .tj-root .info-bar .wx-mini-day > * { flex: none; }
+}
+.tj-root a.chip, .tj-root a.chip:hover { text-decoration: none; }
+@media (max-width: 860px) { .tj-root .info-bar .wx-mini-days { display: none; } }
+@media (max-width: 640px) {
+  .tj-root .info-bar { padding: 6px 12px; min-height: 0; margin-bottom: 12px; gap: 4px 10px; }
+  .tj-root .info-bar .hc-time { font-size: 1.1rem; }
+  .tj-root .info-bar .hc-date { font-size: .8rem; }
+  .tj-root .info-bar .hc-zone { display: none; }
+  .tj-root .info-bar .wx-mini-icon { font-size: 1.15rem; }
+  .tj-root .info-bar .wx-mini-temp { font-size: .95rem; }
+  .tj-root .info-bar .wx-mini-place { font-size: .78rem; }
+}
+@media print { .tj-root .info-bar { display: none; } }
+
 
 /* =========================================================
    WordPress / Elementor integration

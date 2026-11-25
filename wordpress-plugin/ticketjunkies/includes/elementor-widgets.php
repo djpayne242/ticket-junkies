@@ -149,16 +149,17 @@ class TJ_W_Map extends TJ_Listing_Widget { protected $tj_type = 'map';
   protected function tj_opts(array $s) { return ['showTitle' => ($s['show_title'] ?? 'yes') === 'yes', 'title' => $s['title'] ?? '', 'titleFiltered' => $s['title_filtered'] ?? '', 'category' => $s['category'] ?? '', 'height' => (int) ($s['height'] ?? 0)]; }
 }
 class TJ_W_Weather extends TJ_Widget_Base { protected $tj_type = 'weather';
-  public function get_name() { return 'tj_weather'; } public function get_title() { return 'TJ Weather & Clock'; } public function get_icon() { return 'eicon-clock-o'; }
+  public function get_name() { return 'tj_weather'; } public function get_title() { return 'TJ Clock & Weather Bar'; } public function get_icon() { return 'eicon-clock-o'; }
   protected function tj_content_controls() {
     $this->add_control('show_weather', ['label' => 'Weather forecast', 'type' => Controls_Manager::SWITCHER, 'default' => 'yes']);
     $this->add_control('show_clock', ['label' => 'Clock & date (visitor\'s time zone)', 'type' => Controls_Manager::SWITCHER, 'default' => 'yes']);
+    $this->add_control('bar_note', ['type' => Controls_Manager::RAW_HTML, 'raw' => '<small>Shows as one slim bar. Place it above the hero box.</small>']);
     $this->add_control('place_note', ['type' => Controls_Manager::RAW_HTML, 'raw' => '<small>The weather location is set in the Admin Panel → Settings → Maps & weather.</small>']);
   }
   protected function tj_extra_style_controls() {
-    $this->start_controls_section('tj_glass', ['label' => 'Boxes', 'tab' => Controls_Manager::TAB_STYLE]);
-    $this->add_control('glass_bg', ['label' => 'Box background', 'type' => Controls_Manager::COLOR, 'selectors' => ['{{WRAPPER}} .wx-mini, {{WRAPPER}} .hero-clock' => 'background: {{VALUE}};']]);
-    $this->add_control('glass_text', ['label' => 'Box text', 'type' => Controls_Manager::COLOR, 'selectors' => ['{{WRAPPER}} .wx-mini, {{WRAPPER}} .hero-clock' => 'color: {{VALUE}};']]);
+    $this->start_controls_section('tj_glass', ['label' => 'Bar', 'tab' => Controls_Manager::TAB_STYLE]);
+    $this->add_control('glass_bg', ['label' => 'Bar background', 'type' => Controls_Manager::COLOR, 'selectors' => ['{{WRAPPER}} .info-bar' => 'background: linear-gradient({{VALUE}}, {{VALUE}}) padding-box, linear-gradient(90deg, #eb742a, #376eb8) border-box;']]);
+    $this->add_control('glass_text', ['label' => 'Bar text', 'type' => Controls_Manager::COLOR, 'selectors' => ['{{WRAPPER}} .info-bar, {{WRAPPER}} .info-bar .hero-clock, {{WRAPPER}} .info-bar .wx-mini' => 'color: {{VALUE}};']]);
     $this->end_controls_section();
   }
   protected function tj_opts(array $s) { return ['showWeather' => ($s['show_weather'] ?? 'yes') === 'yes', 'showClock' => ($s['show_clock'] ?? 'yes') === 'yes']; }

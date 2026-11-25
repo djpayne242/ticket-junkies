@@ -28,8 +28,7 @@ The owner account controls the Admin Panel and can also post events ("My Events"
 
 **Calendar of events:** under the map, a month calendar (`GET /api/calendar?month=YYYY-MM`, Nassau time) highlights every day that has a published event. Today is outlined in blue. Tapping a highlighted day lists its events with start time and venue, each linking to the event page. ‹ › change month and "Today" jumps back. An overnight party that ends before 6 AM only shows on the night it starts. On phones the day boxes show dots instead of event names. In WordPress, pages that have the events map get the calendar automatically (turn off with `add_filter('tj_auto_calendar', '__return_false')`). It is also the Elementor widget "TJ Calendar of Events" and `[ticketjunkies widget="calendar"]`.
 
-**Phone order of the homepage box:** on phones and tablets the "Get your ticket fix." box shows the title, text and search first, then the live clock, then the weather. On wide screens the clock and weather stay on the right.
-## Features
+**Clock & weather bar:** the live clock and Nassau weather sit in one slim bar above the orange-and-blue box (not inside it). On computers it is a single line: time, short date, time zone, current weather and as many forecast days as fit. On phones it is two short lines (time and date, then current weather). In WordPress, `[ticketjunkies widget="weather"]` / the Elementor widget "TJ Clock & Weather Bar" shows the same bar, and pages with the separate search + weather blocks get the bar placed above the box automatically.
 
 **Everyone**
 - Browse upcoming events, search by keyword, filter by category

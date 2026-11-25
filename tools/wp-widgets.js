@@ -60,27 +60,19 @@ const TJ_WIDGETS = {
     } catch (e) { el.querySelector('.grid').innerHTML = `<div class="error">${esc(e.message)}</div>`; }
   },
   weather(el, o) {
-    el.innerHTML = `<div class="hero-side tj-hero-side">
-      ${o.showWeather === false ? '' : '<div class="wx-mini hidden" id="homeWx"></div>'}
-      ${o.showClock === false ? '' : `<div class="hero-clock" id="homeClock" aria-live="off">
-        <div class="hc-time"><span id="hcTime">--:--</span><span class="hc-sec" id="hcSec"></span><span class="hc-ampm" id="hcAmpm"></span></div>
-        <div class="hc-date" id="hcDate"></div><div class="hc-zone" id="hcZone"></div></div>`}</div>`;
+    el.innerHTML = infoBarHtml(o);
     const place = o.place && o.lat && o.lng ? { name: o.place, lat: Number(o.lat), lng: Number(o.lng) } : META.weatherPlace;
     if (o.showWeather !== false && place) TJGeo.homeWeather(el.querySelector('#homeWx'), place);
     if (o.showClock !== false) startHomeClock();
   },
-  // Orange & blue "Get your ticket fix." box with search, weather and live clock inside
+  // Slim clock & weather bar above the orange & blue "Get your ticket fix." box (search inside)
   hero(el, o) {
     const sv = tjHomeQuery();
-    const side = o.showWeather === false && o.showClock === false ? '' : `<div class="hero-side">
-        ${o.showWeather === false ? '' : '<div class="wx-mini hidden" id="homeWx"></div>'}
-        ${o.showClock === false ? '' : `<div class="hero-clock" id="homeClock" aria-live="off">
-          <div class="hc-time"><span id="hcTime">--:--</span><span class="hc-sec" id="hcSec"></span><span class="hc-ampm" id="hcAmpm"></span></div>
-          <div class="hc-date" id="hcDate"></div><div class="hc-zone" id="hcZone"></div></div>`}</div>`;
+    const bar = infoBarHtml(o);
     const cta = o.showCta === false ? '' : (me?.role === 'organizer'
       ? '<a class="btn btn-green" href="#/create">+ Create an event</a>'
       : `<span>${esc(o.ctaText || 'Hosting an event?')}</span><a class="link" href="#/register?role=organizer">${esc(o.ctaLink || 'Become an organizer →')}</a>`);
-    el.innerHTML = `<section class="hero tj-hero${side ? '' : ' no-side'}">${side}
+    el.innerHTML = `${bar}<section class="hero tj-hero no-side">
       <h1 class="display">${esc(o.title || 'Get your ticket fix.')}</h1>
       ${o.subtitle === '' ? '' : `<p>${esc(o.subtitle || 'Discover the hottest parties, concerts, comedy shows and festivals — or launch your own event and start selling tickets in minutes.')}</p>`}
       ${searchFormHtml(sv, o)}

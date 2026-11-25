@@ -12,7 +12,7 @@ The plugin already creates all of these pages for you. Use the snippets only whe
 | `00-hero-box.html` | Orange & blue "Get your ticket fix." box with search, weather and clock inside |
 | `01-homepage-complete.html` | Complete homepage (hero, search, weather & clock, categories, map, event grid) |
 | `02-search-bar.html` | Search bar |
-| `03-weather-and-clock.html` | Weather & live clock |
+| `03-weather-and-clock.html` | Slim clock & weather bar (put it above the hero box) |
 | `04-become-organizer-button.html` | "Become an organizer" call-to-action |
 | `05-category-buttons.html` | Category buttons (Music, Nightlife, Comedy…) |
 | `06-events-map.html` | Live events map |

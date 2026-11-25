@@ -402,6 +402,17 @@ function wireSearchForm(form, v, onGo) {
 }
 function norm(x) { return String(x || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 
+// ---------- slim clock & weather bar (sits above the orange & blue box) ----------
+function infoBarHtml(o = {}) {
+  if (o.showClock === false && o.showWeather === false) return '';
+  return `<div class="info-bar">
+    ${o.showClock === false ? '' : `<div class="hero-clock ib-clock" id="homeClock" aria-live="off">
+      <span class="hc-time"><span id="hcTime">--:--</span><span class="hc-sec" id="hcSec"></span><span class="hc-ampm" id="hcAmpm"></span></span>
+      <span class="hc-date" id="hcDate"></span><span class="hc-zone" id="hcZone"></span></div>`}
+    ${o.showWeather === false ? '' : '<div class="wx-mini ib-wx hidden" id="homeWx"></div>'}
+  </div>`;
+}
+
 // ---------- Calendar of events (month view, days with events highlighted) ----------
 const CAL_WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 function calendarHtml(o = {}) {
@@ -477,15 +488,8 @@ async function pageHome(params) {
     return `<a class="chip ${c === category ? 'active' : ''}" href="#/?${p}">${c ? esc(c) : 'All'}</a>`;
   }).join('');
   $app.innerHTML = `
-    <section class="hero">
-      <div class="hero-side">
-        <div class="wx-mini hidden" id="homeWx"></div>
-        <div class="hero-clock" id="homeClock" aria-live="off">
-          <div class="hc-time"><span id="hcTime">--:--</span><span class="hc-sec" id="hcSec"></span><span class="hc-ampm" id="hcAmpm"></span></div>
-          <div class="hc-date" id="hcDate"></div>
-          <div class="hc-zone" id="hcZone"></div>
-        </div>
-      </div>
+    ${infoBarHtml()}
+    <section class="hero no-side">
       <h1 class="display">Get your ticket fix.</h1>
       <p>Discover the hottest parties, concerts, comedy shows and festivals — or launch your own event and start selling tickets in minutes.</p>
       ${searchFormHtml(sv)}
@@ -2360,9 +2364,10 @@ function startHomeClock() {
     document.getElementById('hcTime').textContent = `${get('hour')}:${get('minute')}`;
     document.getElementById('hcSec').textContent = ':' + get('second');
     document.getElementById('hcAmpm').textContent = ampm ? ' ' + ampm : '';
-    document.getElementById('hcDate').textContent = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    document.getElementById('hcDate').textContent = now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
     const abbr = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(now).find((p) => p.type === 'timeZoneName')?.value || '';
-    document.getElementById('hcZone').textContent = `🕒 Your time · ${tz.replace(/_/g, ' ')}${abbr ? ' (' + abbr + ')' : ''}`;
+    const z = document.getElementById('hcZone');
+    if (z) { z.textContent = abbr || tz.replace(/_/g, ' '); z.title = 'Your time · ' + tz.replace(/_/g, ' '); }
   };
   tick();
   homeClockTimer = setInterval(tick, 1000);
