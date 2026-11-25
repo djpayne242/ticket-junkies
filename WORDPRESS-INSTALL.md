@@ -22,6 +22,12 @@ Every page is an **Elementor page**, so you can drag things around, add sections
    - Go to **Settings → Permalinks**, choose **Post name** and click **Save**.
 6. Go to **Settings → General → Timezone**, choose **Nassau** and click **Save**. This matters: without it, event times in emails, tickets and reports show in the wrong time zone (an 8 PM party would show as 1 AM).
 
+## Automatic updates from GitHub
+The plugin is connected to **github.com/djpayne242/ticket-junkies**. When a new version is published there, **Plugins** shows "There is a new version of TicketJunkies available", and you click **update now**.
+- To have updates install by themselves, click **Enable auto-updates** next to TicketJunkies on the Plugins screen.
+- To check straight away, click **Check GitHub for updates** under the plugin's name.
+- Always download the plugin from the repository's **Releases** page (or the `dist` folder), not GitHub's green "Code → Download ZIP" button. That button packs the whole repository, not the plugin.
+
 ## Bring over your existing events, accounts and orders
 1. Open **TicketJunkies → Start here** and scroll to **Bring over your existing TicketJunkies data**.
 2. Upload **ticketjunkies-import.json** and click **Import**.
