@@ -759,16 +759,54 @@ route('POST', '/api/auth/logout', ({ req, res }) => {
 
 route('GET', '/api/auth/me', ({ req }) => ({ user: publicUser(currentUser(req)) }));
 
+// ---------- homepage search filters (organizer, venue, date, year, time of day) ----------
+const SITE_TZ = 'America/Nassau';
+const siteDtf = new Intl.DateTimeFormat('en-CA', { timeZone: SITE_TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' });
+function siteParts(iso) {
+  const p = Object.fromEntries(siteDtf.formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, year: p.year, hour: Number(p.hour) % 24 };
+}
+const TIME_SLOTS = { morning: (h) => h >= 5 && h < 12, afternoon: (h) => h >= 12 && h < 17, evening: (h) => h >= 17 && h < 21, night: (h) => h >= 21 || h < 5 };
+function searchFilters(query) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(query.get('date') || '') ? query.get('date') : '';
+  const year = /^\d{4}$/.test(query.get('year') || '') ? query.get('year') : '';
+  const time = TIME_SLOTS[query.get('time')] ? query.get('time') : '';
+  return { organizer: norm(query.get('organizer')), venue: norm(query.get('venue')), date, year, time };
+}
+function matchesFilters(e, f) {
+  if (f.organizer && !eventOrganizers(e).some((n) => norm(n) === f.organizer)) return false;
+  if (f.venue && !eventVenueNames(e).some((n) => norm(n) === f.venue)) return false;
+  if (f.date || f.year || f.time) {
+    const s = siteParts(e.startsAt);
+    if (f.year && s.year !== f.year) return false;
+    if (f.time && !TIME_SLOTS[f.time](s.hour)) return false;
+    if (f.date) { const end = siteParts(new Date(new Date(e.endsAt).getTime() - 1)).date; if (f.date < s.date || f.date > end) return false; }
+  }
+  return true;
+}
+const upcomingPublished = () => db.events.filter((e) => e.status === 'published' && new Date(e.endsAt).getTime() > Date.now());
+// Choices for the search dropdowns, taken from events people can buy tickets for right now
+route('GET', '/api/search-options', () => {
+  const orgs = new Map(), venues = new Map(), years = new Set([String(new Date().getFullYear())]);
+  for (const e of upcomingPublished()) {
+    for (const n of eventOrganizers(e)) if (!orgs.has(norm(n))) orgs.set(norm(n), n);
+    for (const n of eventVenueNames(e)) if (!venues.has(norm(n))) venues.set(norm(n), n);
+    years.add(siteParts(e.startsAt).year);
+  }
+  const abc = (a, b) => a.localeCompare(b);
+  return { organizers: [...orgs.values()].sort(abc), venues: [...venues.values()].sort(abc), years: [...years].sort() };
+});
+
 route('GET', '/api/events', ({ req, query }) => {
   const viewer = currentUser(req);
   const q = (query.get('q') || '').toLowerCase().trim();
   const category = query.get('category') || '';
   const city = (query.get('city') || '').toLowerCase().trim();
-  const now = Date.now();
-  const list = db.events
-    .filter((e) => e.status === 'published' && new Date(e.endsAt).getTime() > now)
+  const filters = searchFilters(query);
+  const list = upcomingPublished()
     .filter((e) => !category || e.category === category)
     .filter((e) => !city || e.city.toLowerCase().includes(city))
+    .filter((e) => matchesFilters(e, filters))
     .filter((e) => {
       if (!q) return true;
       const p = db.users.find((u) => u.id === e.organizerId);

@@ -1,15 +1,16 @@
 
 // ---------- Elementor / shortcode widgets ----------
 // Each widget prints <div class="tj-root tj-widget" data-tj-widget="..." data-tj-opts='{...}'></div>; this mounts them.
-const tjHomeQuery = () => { const s = new URLSearchParams(location.search); return { q: s.get('q') || '', category: s.get('category') || '' }; };
+const tjHomeQuery = () => searchValues(new URLSearchParams(location.search));
 const tjEventsCache = {};
 function tjEvents(params) {
-  const p = new URLSearchParams(); if (params.q) p.set('q', params.q); if (params.category) p.set('category', params.category);
+  const p = searchParams(searchValues(params));
   const k = p.toString();
   return (tjEventsCache[k] ||= api('/api/events?' + p).then((r) => r.events));
 }
 const tjOpts = (el) => { try { return JSON.parse(el.getAttribute('data-tj-opts') || '{}'); } catch { return {}; } };
-const tjHomeUrl = (params) => { const p = new URLSearchParams(); if (params.q) p.set('q', params.q); if (params.category) p.set('category', params.category); const s = p.toString(); return (TJ.pages.home || TJ.home) + (s ? '?' + s : ''); };
+const tjHomeUrl = (params) => { const s = searchParams(searchValues(params)).toString(); return (TJ.pages.home || TJ.home) + (s ? '?' + s : ''); };
+const tjGoSearch = (p) => { const s = p.toString(); location.href = (TJ.pages.home || TJ.home) + (s ? '?' + s : ''); };
 
 const TJ_WIDGETS = {
   // Full routed screens (event page, checkout, dashboards, admin …)
@@ -22,25 +23,17 @@ const TJ_WIDGETS = {
     route();
   },
   search(el, o) {
-    const { q, category } = tjHomeQuery();
-    const catOpts = META.categories.map((c) => `<option ${c === category ? 'selected' : ''}>${esc(c)}</option>`).join('');
-    el.innerHTML = `<form class="search" role="search">
-      <input name="q" placeholder="${esc(o.placeholder || 'Search events, venues, organizers…')}" value="${esc(q)}" />
-      ${o.showCategory === false ? '' : `<select name="category"><option value="">${esc(o.allLabel || 'All categories')}</option>${catOpts}</select>`}
-      <button class="btn btn-primary">${esc(o.button || 'Search')}</button></form>`;
-    el.querySelector('form').onsubmit = (e) => {
-      e.preventDefault();
-      const f = new FormData(e.target);
-      location.href = tjHomeUrl({ q: f.get('q') || '', category: f.get('category') || '' });
-    };
+    const v = tjHomeQuery();
+    el.innerHTML = searchFormHtml(v, o);
+    wireSearchForm(el.querySelector('form'), v, tjGoSearch);
   },
   chips(el, o) {
-    const { q, category } = tjHomeQuery();
-    el.innerHTML = `<div class="chips">${['', ...META.categories].map((c) => `<a class="chip ${c === category ? 'active' : ''}" href="${esc(tjHomeUrl({ q, category: c }))}">${c ? esc(c) : esc(o.allLabel || 'All')}</a>`).join('')}</div>`;
+    const sv = tjHomeQuery(); const { category } = sv;
+    el.innerHTML = `<div class="chips">${['', ...META.categories].map((c) => `<a class="chip ${c === category ? 'active' : ''}" href="${esc(tjHomeUrl({ ...sv, category: c }))}">${c ? esc(c) : esc(o.allLabel || 'All')}</a>`).join('')}</div>`;
   },
   async map(el, o) {
     const query = o.category ? { q: '', category: o.category } : tjHomeQuery();
-    const filtered = query.q || query.category;
+    const filtered = searchActive(searchValues(query));
     el.innerHTML = `<section class="map-section">
       ${o.showTitle === false ? '' : `<div class="section-head"><h2>${esc(filtered ? (o.titleFiltered || '🗺️ These events on the map') : (o.title || '🗺️ Live events on the map'))}</h2><span class="muted small tj-map-count">Tap a pin to see the event</span></div>`}
       <div class="events-map" style="${o.height ? `height:${Number(o.height)}px` : ''}"><div class="loading">Loading map…</div></div></section>`;
@@ -55,7 +48,7 @@ const TJ_WIDGETS = {
   },
   async grid(el, o) {
     const query = o.category ? { q: '', category: o.category } : tjHomeQuery();
-    const filtered = !o.category && (query.q || query.category);
+    const filtered = !o.category && searchActive(searchValues(query));
     el.innerHTML = `${o.showTitle === false ? '' : `<div class="section-head"><h2>${esc(filtered ? (o.titleFiltered || 'Search results') : (o.title || 'Upcoming events'))}</h2>${o.showCount === false ? '' : '<span class="muted small tj-count"></span>'}</div>`}
       <div class="grid"${o.columns ? ` style="grid-template-columns:repeat(${Number(o.columns)},minmax(0,1fr))"` : ''}><div class="loading">Loading events…</div></div>`;
     try {
@@ -78,8 +71,7 @@ const TJ_WIDGETS = {
   },
   // Orange & blue "Get your ticket fix." box with search, weather and live clock inside
   hero(el, o) {
-    const { q, category } = tjHomeQuery();
-    const catOpts = META.categories.map((c) => `<option ${c === category ? 'selected' : ''}>${esc(c)}</option>`).join('');
+    const sv = tjHomeQuery();
     const side = o.showWeather === false && o.showClock === false ? '' : `<div class="hero-side">
         ${o.showWeather === false ? '' : '<div class="wx-mini hidden" id="homeWx"></div>'}
         ${o.showClock === false ? '' : `<div class="hero-clock" id="homeClock" aria-live="off">
@@ -91,18 +83,10 @@ const TJ_WIDGETS = {
     el.innerHTML = `<section class="hero tj-hero${side ? '' : ' no-side'}">${side}
       <h1 class="display">${esc(o.title || 'Get your ticket fix.')}</h1>
       ${o.subtitle === '' ? '' : `<p>${esc(o.subtitle || 'Discover the hottest parties, concerts, comedy shows and festivals — or launch your own event and start selling tickets in minutes.')}</p>`}
-      <form class="search" role="search">
-        <input name="q" placeholder="${esc(o.placeholder || 'Search events, venues, organizers…')}" value="${esc(q)}" />
-        <select name="category"><option value="">All categories</option>${catOpts}</select>
-        <button class="btn btn-primary">${esc(o.button || 'Search')}</button>
-      </form>
+      ${searchFormHtml(sv, o)}
       ${cta ? `<div class="hero-cta">${cta}</div>` : ''}
     </section>`;
-    el.querySelector('form').onsubmit = (e) => {
-      e.preventDefault();
-      const f = new FormData(e.target);
-      location.href = tjHomeUrl({ q: f.get('q') || '', category: f.get('category') || '' });
-    };
+    wireSearchForm(el.querySelector('form.search-adv'), sv, tjGoSearch);
     const place = META.weatherPlace;
     if (o.showWeather !== false && place) TJGeo.homeWeather(el.querySelector('#homeWx'), place);
     if (o.showClock !== false) startHomeClock();

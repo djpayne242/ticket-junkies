@@ -353,13 +353,64 @@ async function route() {
 }
 window.addEventListener('hashchange', route);
 
+// ---------- search form (keyword, category, organizer, venue, date, year, time of day) ----------
+const SEARCH_KEYS = ['q', 'category', 'organizer', 'venue', 'date', 'year', 'time'];
+const SEARCH_TIMES = [['morning', 'Morning (5 AM – 12 PM)'], ['afternoon', 'Afternoon (12 – 5 PM)'], ['evening', 'Evening (5 – 9 PM)'], ['night', 'Late night (9 PM – 5 AM)']];
+function searchValues(src) { const v = {}; for (const k of SEARCH_KEYS) v[k] = (src && (src.get ? src.get(k) : src[k])) || ''; return v; }
+function searchParams(v, over = {}) { const p = new URLSearchParams(); for (const k of SEARCH_KEYS) { const x = k in over ? over[k] : v[k]; if (x) p.set(k, x); } return p; }
+const searchActive = (v) => SEARCH_KEYS.some((k) => v[k]);
+let searchOptionsP = null;
+const searchOptions = () => (searchOptionsP ||= api('/api/search-options').catch(() => ({ organizers: [], venues: [], years: [] })));
+function searchFormHtml(v, o = {}) {
+  const opt = (val, label, cur) => `<option value="${esc(val)}" ${val === cur ? 'selected' : ''}>${esc(label)}</option>`;
+  const keep = (list, cur) => (cur && !list.includes(cur) ? [cur, ...list] : list);
+  const sel = (name, label, all, list, cur) => `<label class="sf"><span>${label}</span><select name="${name}">${opt('', all, cur)}${list.map((x) => Array.isArray(x) ? opt(x[0], x[1], cur) : opt(x, x, cur)).join('')}</select></label>`;
+  return `<form class="search search-adv" role="search">
+    <div class="sf-main">
+      <input name="q" aria-label="Search" placeholder="${esc(o.placeholder || 'Search events, venues, organizers…')}" value="${esc(v.q)}" />
+      <button class="btn btn-primary">${esc(o.button || 'Search')}</button>
+    </div>
+    <div class="sf-grid">
+      ${o.showCategory === false ? '' : sel('category', 'Category', 'All categories', META.categories, v.category)}
+      ${sel('organizer', 'Organizer', 'All organizers', keep([], v.organizer), v.organizer)}
+      ${sel('venue', 'Venue', 'All venues', keep([], v.venue), v.venue)}
+      <label class="sf"><span>Date</span><input type="date" name="date" value="${esc(v.date)}" /></label>
+      ${sel('year', 'Year', 'Any year', keep([], v.year), v.year)}
+      ${sel('time', 'Time', 'Any time', SEARCH_TIMES, v.time)}
+    </div>
+    <div class="sf-foot ${searchActive(v) ? '' : 'hidden'}"><a href="#" class="sf-clear">✕ Clear search</a></div>
+  </form>`;
+}
+// Fills the organizer / venue / year lists and wires the form. onGo(URLSearchParams) runs on submit.
+function wireSearchForm(form, v, onGo) {
+  const submit = () => {
+    const f = new FormData(form); const nv = {};
+    for (const k of SEARCH_KEYS) nv[k] = String(f.get(k) || '').trim();
+    onGo(searchParams(nv));
+  };
+  form.onsubmit = (e) => { e.preventDefault(); submit(); };
+  // dropdowns search straight away; the keyword box waits for Enter / Search
+  form.querySelectorAll('select, input[type=date]').forEach((x) => x.addEventListener('change', submit));
+  const clr = form.querySelector('.sf-clear');
+  if (clr) clr.onclick = (e) => { e.preventDefault(); onGo(new URLSearchParams()); };
+  searchOptions().then((opts) => {
+    const fill = (name, list) => {
+      const s = form.querySelector(`select[name="${name}"]`); if (!s) return;
+      const cur = v[name];
+      const all = cur && !list.some((x) => norm(x) === norm(cur)) ? [cur, ...list] : list;
+      s.innerHTML = s.options[0].outerHTML + all.map((x) => `<option value="${esc(x)}" ${norm(x) === norm(cur) ? 'selected' : ''}>${esc(x)}</option>`).join('');
+    };
+    fill('organizer', opts.organizers || []); fill('venue', opts.venues || []); fill('year', opts.years || []);
+  });
+}
+function norm(x) { return String(x || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+
 // ---------- pages ----------
 async function pageHome(params) {
-  const q = params.get('q') || '';
-  const category = params.get('category') || '';
-  const catOpts = META.categories.map((c) => `<option ${c === category ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  const sv = searchValues(params);
+  const { q, category } = sv;
   const chips = ['', ...META.categories].map((c) => {
-    const p = new URLSearchParams(); if (q) p.set('q', q); if (c) p.set('category', c);
+    const p = searchParams(sv, { category: c });
     return `<a class="chip ${c === category ? 'active' : ''}" href="#/?${p}">${c ? esc(c) : 'All'}</a>`;
   }).join('');
   $app.innerHTML = `
@@ -374,32 +425,23 @@ async function pageHome(params) {
       </div>
       <h1 class="display">Get your ticket fix.</h1>
       <p>Discover the hottest parties, concerts, comedy shows and festivals — or launch your own event and start selling tickets in minutes.</p>
-      <form class="search" id="searchForm">
-        <input name="q" placeholder="Search events, venues, organizers…" value="${esc(q)}" />
-        <select name="category"><option value="">All categories</option>${catOpts}</select>
-        <button class="btn btn-primary">Search</button>
-      </form>
+      ${searchFormHtml(sv)}
       <div class="hero-cta">${me?.role === 'organizer' ? '<a class="btn btn-green" href="#/create">+ Create an event</a>' : '<span>Hosting an event?</span><a class="link" href="#/register?role=organizer">Become an organizer →</a>'}</div>
     </section>
     <div class="chips">${chips}</div>
     <section class="map-section">
-      <div class="section-head"><h2>🗺️ ${q || category ? 'These events on the map' : 'Live events on the map'}</h2><span class="muted small" id="mapCount">Tap a pin to see the event</span></div>
+      <div class="section-head"><h2>🗺️ ${searchActive(sv) ? 'These events on the map' : 'Live events on the map'}</h2><span class="muted small" id="mapCount">Tap a pin to see the event</span></div>
       <div class="events-map" id="eventsMap"><div class="loading">Loading map…</div></div>
     </section>
-    <div class="section-head"><h2>${q || category ? 'Search results' : 'Upcoming events'}</h2><span class="muted small" id="count"></span></div>
+    <div class="section-head"><h2>${searchActive(sv) ? 'Search results' : 'Upcoming events'}</h2><span class="muted small" id="count"></span></div>
     <div class="grid" id="grid"><div class="loading">Loading events…</div></div>
     ${me?.role === 'organizer' ? '' : `
     <section class="promo-band">
       <div><h2 class="display">Throw events? Sell tickets here.</h2><p class="muted" style="margin:0">Create your event page, set ticket types and prices, track sales and check guests in at the door.</p></div>
       <a class="btn btn-primary" href="#/register?role=organizer">Start selling — it's free</a>
     </section>`}`;
-  document.getElementById('searchForm').onsubmit = (e) => {
-    e.preventDefault();
-    const f = new FormData(e.target); const p = new URLSearchParams();
-    if (f.get('q')) p.set('q', f.get('q')); if (f.get('category')) p.set('category', f.get('category'));
-    go('#/?' + p);
-  };
-  const p = new URLSearchParams(); if (q) p.set('q', q); if (category) p.set('category', category);
+  wireSearchForm($app.querySelector('form.search-adv'), sv, (p) => go('#/' + (p.toString() ? '?' + p : '')));
+  const p = searchParams(sv);
   if (META.weatherPlace) TJGeo.homeWeather(document.getElementById('homeWx'), META.weatherPlace);
   startHomeClock();
   const { events } = await api('/api/events?' + p);
@@ -410,7 +452,7 @@ async function pageHome(params) {
     .catch(() => { mapEl.innerHTML = '<div class="empty" style="box-shadow:none">Map could not be loaded right now.</div>'; });
   document.getElementById('count').textContent = `${events.length} event${events.length === 1 ? '' : 's'}`;
   document.getElementById('grid').innerHTML = events.length ? events.map(card).join('')
-    : `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div><h3>No events found</h3><p class="muted">Try another search or category.</p></div>`;
+    : `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div><h3>No events found</h3><p class="muted">Try another search, or <a href="#/">clear the search</a>.</p></div>`;
 }
 
 async function pageEvent(id) {

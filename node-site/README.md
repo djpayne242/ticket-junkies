@@ -24,6 +24,8 @@ Data is stored in `data/db.json` (delete it to reset to the demo data). Uploaded
 The owner account controls the Admin Panel and can also post events ("My Events" / "+ Create Event"). If the database ever has no admin, the server creates a fallback admin@ticketjunkies.com / admin12345 at startup; change its password immediately if that happens. Change or remove the demo accounts before launch. They're created in `seed()` in `server.mjs`.
 
 
+**Search filters:** the homepage search has a keyword box plus Category, Organizer, Venue, Date, Year and Time of day (Morning 5 AM–12 PM, Afternoon 12–5 PM, Evening 5–9 PM, Late night 9 PM–5 AM). The Organizer, Venue and Year lists fill themselves from upcoming published events (`GET /api/search-options`). Dates and times use Nassau time, and an event that runs past midnight matches both days. The dropdowns search right away; "Clear search" resets everything. Links look like `/?organizer=Dj%20Payne%20Events&time=evening`.
+
 **Phone order of the homepage box:** on phones and tablets the "Get your ticket fix." box shows the title, text and search first, then the live clock, then the weather. On wide screens the clock and weather stay on the right.
 ## Features
 

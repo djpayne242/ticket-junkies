@@ -97,6 +97,7 @@ class TJ_Rest {
 
   private static function define_routes() {
     self::route('GET', '/meta', 'r_meta');
+    self::route('GET', '/search-options', 'r_search_options');
     self::route('GET', '/weather', 'r_weather');
     self::route('GET', '/geocode', 'r_geocode');
     self::route('POST', '/auth/register', 'r_register');
@@ -668,11 +669,13 @@ class TJ_Rest {
     $q = strtolower(trim((string) self::q($c, 'q')));
     $category = (string) self::q($c, 'category');
     $city = strtolower(trim((string) self::q($c, 'city')));
+    $filters = self::search_filters($c);
     $now = self::now_ms();
     $list = array();
     foreach (TJ_Store::events() as $e) {
       if ($e['status'] !== 'published' || !(TJ_Store::ts_ms($e['endsAt']) > $now)) continue;
       if ($category !== '' && $e['category'] !== $category) continue;
+      if (!self::matches_filters($e, $filters)) continue;
       if ($city !== '' && strpos(strtolower($e['city']), $city) === false) continue;
       if ($q !== '') {
         $p = TJ_Store::user_by_id($e['organizerId']);
@@ -692,6 +695,54 @@ class TJ_Rest {
       } else $out[] = self::public_event($e, $viewer);
     }
     return array('events' => $out);
+  }
+
+  // ---------- homepage search filters (organizer, venue, date, year, time of day) ----------
+  private static function site_parts($iso_or_ms) {
+    $ms = is_numeric($iso_or_ms) ? (float) $iso_or_ms : TJ_Store::ts_ms($iso_or_ms);
+    $d = new DateTime('@' . (int) floor($ms / 1000));
+    $d->setTimezone(wp_timezone());
+    return array('date' => $d->format('Y-m-d'), 'year' => $d->format('Y'), 'hour' => (int) $d->format('G'));
+  }
+  private static function time_slot_ok($slot, $h) {
+    if ($slot === 'morning') return $h >= 5 && $h < 12;
+    if ($slot === 'afternoon') return $h >= 12 && $h < 17;
+    if ($slot === 'evening') return $h >= 17 && $h < 21;
+    if ($slot === 'night') return $h >= 21 || $h < 5;
+    return true;
+  }
+  private static function search_filters($c) {
+    $date = (string) self::q($c, 'date'); $year = (string) self::q($c, 'year'); $time = (string) self::q($c, 'time');
+    return array(
+      'organizer' => TJ_Directory::norm(self::q($c, 'organizer')), 'venue' => TJ_Directory::norm(self::q($c, 'venue')),
+      'date' => preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? $date : '',
+      'year' => preg_match('/^\d{4}$/', $year) ? $year : '',
+      'time' => in_array($time, array('morning', 'afternoon', 'evening', 'night'), true) ? $time : '',
+    );
+  }
+  private static function matches_filters($e, $f) {
+    if ($f['organizer'] !== '') { $ok = false; foreach (TJ_Directory::event_organizers($e) as $n) if (TJ_Directory::norm($n) === $f['organizer']) $ok = true; if (!$ok) return false; }
+    if ($f['venue'] !== '') { $ok = false; foreach (TJ_Directory::event_venue_names($e) as $n) if (TJ_Directory::norm($n) === $f['venue']) $ok = true; if (!$ok) return false; }
+    if ($f['date'] !== '' || $f['year'] !== '' || $f['time'] !== '') {
+      $s = self::site_parts($e['startsAt']);
+      if ($f['year'] !== '' && $s['year'] !== $f['year']) return false;
+      if ($f['time'] !== '' && !self::time_slot_ok($f['time'], $s['hour'])) return false;
+      if ($f['date'] !== '') { $end = self::site_parts(TJ_Store::ts_ms($e['endsAt']) - 1000); if ($f['date'] < $s['date'] || $f['date'] > $end['date']) return false; }
+    }
+    return true;
+  }
+  /** Choices for the search dropdowns, from events people can buy tickets for right now. */
+  public static function r_search_options($c) {
+    $now = self::now_ms();
+    $orgs = array(); $venues = array(); $years = array(wp_date('Y') => true);
+    foreach (TJ_Store::events() as $e) {
+      if ($e['status'] !== 'published' || !(TJ_Store::ts_ms($e['endsAt']) > $now)) continue;
+      foreach (TJ_Directory::event_organizers($e) as $n) { $k = TJ_Directory::norm($n); if ($k !== '' && !isset($orgs[$k])) $orgs[$k] = $n; }
+      foreach (TJ_Directory::event_venue_names($e) as $n) { $k = TJ_Directory::norm($n); if ($k !== '' && !isset($venues[$k])) $venues[$k] = $n; }
+      $p = self::site_parts($e['startsAt']); $years[$p['year']] = true;
+    }
+    $o = array_values($orgs); natcasesort($o); $v = array_values($venues); natcasesort($v); $y = array_map('strval', array_keys($years)); sort($y);
+    return array('organizers' => array_values($o), 'venues' => array_values($v), 'years' => $y);
   }
 
   public static function r_event_get($c) {
