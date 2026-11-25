@@ -315,14 +315,16 @@ class TJ_Rest {
     if (in_array($k, array('paid', 'free', 'donation'), true)) return $k;
     return (float) $t['price'] > 0 ? 'paid' : 'free';
   }
-  /** Lowest open public price for "From $X" labels: priceFrom, priceKind, soldOut */
+  public static function tier_on_sale($t) { $s = self::g($t, 'salesStart'); return !$s || TJ_Store::ts_ms($s) <= self::now_ms(); }
+  /** Lowest open public price for "From $X" labels: priceFrom, priceKind, soldOut, salesStart (next opening when none on sale) */
   public static function lowest_price($tiers) {
-    $best = null;
+    $best = null; $next = null;
     foreach ($tiers as $t) {
       if (self::g($t, 'visibility') === 'private' || $t['quantity'] - $t['sold'] <= 0) continue;
+      if (!self::tier_on_sale($t)) { if ($next === null || strcmp($t['salesStart'], $next) < 0) $next = $t['salesStart']; continue; }
       if ($best === null || $t['price'] < $best['price'] || ($t['price'] == $best['price'] && self::tier_kind($t) === 'paid')) $best = $t;
     }
-    return $best ? array('priceFrom' => $best['price'], 'priceKind' => self::tier_kind($best), 'soldOut' => false) : array('priceFrom' => null, 'priceKind' => null, 'soldOut' => true);
+    return $best ? array('priceFrom' => $best['price'], 'priceKind' => self::tier_kind($best), 'soldOut' => false) : array('priceFrom' => null, 'priceKind' => null, 'soldOut' => $next === null, 'salesStart' => $next);
   }
 
   public static function public_event($ev, $viewer) {
@@ -332,7 +334,7 @@ class TJ_Rest {
     foreach ($ev['tiers'] as $t) {
       if (self::g($t, 'visibility') === 'private' && !$own) continue;
       $tiers[] = array('id' => $t['id'], 'name' => $t['name'], 'description' => (string) self::g($t, 'description', ''), 'visibility' => self::g($t, 'visibility') === 'private' ? 'private' : 'public',
-        'kind' => self::tier_kind($t), 'price' => $t['price'], 'suggested' => self::g($t, 'suggested'), 'remaining' => max(0, $t['quantity'] - $t['sold']), 'fee' => self::n(self::ticket_fee($t['price'])));
+        'kind' => self::tier_kind($t), 'price' => $t['price'], 'suggested' => self::g($t, 'suggested'), 'salesStart' => self::g($t, 'salesStart'), 'onSale' => self::tier_on_sale($t), 'remaining' => max(0, $t['quantity'] - $t['sold']), 'fee' => self::n(self::ticket_fee($t['price'])));
     }
     return array(
       'id' => $ev['id'], 'title' => $ev['title'], 'category' => $ev['category'], 'description' => $ev['description'],
@@ -443,9 +445,18 @@ class TJ_Rest {
       if ($old && $old['sold'] - (int) self::g($old, 'comped', 0) > 0 && $kind !== self::tier_kind($old)) self::fail(400, '"' . $name . '" has sales; it can\'t be changed between paid, free and donation');
       if ($old && $old['sold'] - (int) self::g($old, 'comped', 0) > 0 && (float) $price !== (float) $old['price']) self::fail(400, '"' . $name . '" has sales; its ' . ($kind === 'donation' ? 'minimum donation' : 'price') . ' can\'t change');
       $tdesc = self::str(self::g($t, 'description'), 'Description for "' . $name . '"', 300);
+      // optional: when this ticket type goes on sale (a countdown shows until then)
+      $salesStart = null;
+      $ssraw = self::g($t, 'salesStart');
+      if ($ssraw !== null && is_scalar($ssraw) && trim((string) $ssraw) !== '') {
+        $ssms = TJ_Store::ts_ms((string) $ssraw);
+        if (!$ssms) self::fail(400, 'Sales start for "' . $name . '" is not a valid date and time');
+        if ($ssms >= TJ_Store::ts_ms(self::iso_ms($end))) self::fail(400, 'Sales for "' . $name . '" must start before the event ends');
+        $salesStart = self::iso_ms($ssms);
+      }
       $tiers[] = array(
         'id' => $old ? $old['id'] : TJ_Store::new_id('tier'), 'name' => $name, 'description' => $tdesc,
-        'visibility' => self::g($t, 'visibility') === 'private' ? 'private' : 'public', 'kind' => $kind, 'price' => self::n($price), 'suggested' => $kind === 'donation' && $suggested !== null ? self::n($suggested) : null, 'quantity' => (int) $quantity,
+        'visibility' => self::g($t, 'visibility') === 'private' ? 'private' : 'public', 'kind' => $kind, 'price' => self::n($price), 'suggested' => $kind === 'donation' && $suggested !== null ? self::n($suggested) : null, 'salesStart' => $salesStart, 'quantity' => (int) $quantity,
         'sold' => $old ? (int) $old['sold'] : 0, 'comped' => $old ? (int) self::g($old, 'comped', 0) : 0,
       );
     }
@@ -932,6 +943,7 @@ class TJ_Rest {
       if ($ti === null) self::fail(400, 'Unknown ticket type');
       $tier = $ev['tiers'][$ti];
       if ($tier['quantity'] - $tier['sold'] < $qty) self::fail(409, 'Only ' . ($tier['quantity'] - $tier['sold']) . ' "' . $tier['name'] . '" tickets left');
+      if (!self::tier_on_sale($tier)) self::fail(400, '"' . $tier['name'] . '" tickets are not on sale yet');
       // donation tickets: the buyer picks the amount per ticket, at least the organizer's minimum
       $kind = self::tier_kind($tier);
       $unit = $kind === 'free' ? 0 : (float) $tier['price'];

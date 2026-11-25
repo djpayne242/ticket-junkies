@@ -1041,3 +1041,13 @@ a.chip, a.chip:hover { text-decoration: none; }
 .tier-row .tier-desc-field { grid-column: 1 / -1; }
 @media (max-width: 1000px) { .tier-row { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 640px) { .tier-row { grid-template-columns: 1fr; } }
+
+/* ticket types that are not on sale yet */
+.tier.tier-soon { opacity: .95; }
+.cd-chip.sale { color: #c65a16; background: rgba(235, 116, 42, .14); white-space: nowrap; }
+:root[data-theme="dark"] .cd-chip.sale { color: #f5a36d; background: rgba(235, 116, 42, .2); }
+.cd-chip.sale.is-live { color: #3f8a22; background: rgba(132, 214, 95, .2); }
+.badge.soon { background: rgba(235, 116, 42, .16); color: #c65a16; }
+:root[data-theme="dark"] .badge.soon { color: #f5a36d; }
+.tier-row .tier-sale-field { grid-column: 1 / -1; }
+.tier-row .tier-sale-field input { max-width: 320px; }

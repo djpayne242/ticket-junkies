@@ -252,17 +252,22 @@ function publicEvent(ev, viewer) {
     isOwner: !!viewer && (viewer.id === ev.organizerId || viewer.role === 'admin'),
     // Private ticket types (comps, guest list, staff…) are only visible to the event's organizer and admins.
     tiers: ev.tiers.filter((t) => t.visibility !== 'private' || (!!viewer && (viewer.id === ev.organizerId || viewer.role === 'admin')))
-      .map((t) => ({ id: t.id, name: t.name, description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public', kind: tierKind(t), price: t.price, suggested: t.suggested ?? null, remaining: Math.max(0, t.quantity - t.sold), fee: ticketFee(t.price) })),
+      .map((t) => ({ id: t.id, name: t.name, description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public', kind: tierKind(t), price: t.price, suggested: t.suggested ?? null, salesStart: t.salesStart || null, onSale: tierOnSale(t), remaining: Math.max(0, t.quantity - t.sold), fee: ticketFee(t.price) })),
   };
 }
 const isPublicTier = (t) => t.visibility !== 'private';
 const TICKET_KINDS = ['paid', 'free', 'donation'];
 // Older ticket types have no kind: $0 = free, anything else = paid
 function tierKind(t) { return TICKET_KINDS.includes(t.kind) ? t.kind : (t.price > 0 ? 'paid' : 'free'); }
+const tierOnSale = (t) => !t.salesStart || new Date(t.salesStart).getTime() <= Date.now();
 // Lowest open public price, for "From $X" labels
 function lowestPrice(tiers) {
-  const open = tiers.filter((t) => t.visibility !== 'private' && t.quantity - t.sold > 0);
-  if (!open.length) return { priceFrom: null, priceKind: null, soldOut: true };
+  const avail = tiers.filter((t) => t.visibility !== 'private' && t.quantity - t.sold > 0);
+  const open = avail.filter(tierOnSale);
+  if (!open.length) {
+    const next = avail.map((t) => t.salesStart).filter(Boolean).sort()[0] || null;
+    return { priceFrom: null, priceKind: null, soldOut: !next, salesStart: next };
+  }
   const best = open.reduce((a, t) => (t.price < a.price || (t.price === a.price && tierKind(t) === 'paid') ? t : a), open[0]);
   return { priceFrom: best.price, priceKind: tierKind(best), soldOut: false };
 }
@@ -363,7 +368,15 @@ function validateEvent(b, existing) {
     if (old && old.sold - (old.comped || 0) > 0 && price !== old.price) fail(400, `"${name}" has sales; its ${kind === 'donation' ? 'minimum donation' : 'price'} can't change`);
     const description = str(t.description, { name: `Description for "${name}"`, max: 300 });
     const visibility = t.visibility === 'private' ? 'private' : 'public';
-    return { id: old ? old.id : newId('tier'), name, description, visibility, kind, price, ...(kind === 'donation' ? { suggested } : {}), quantity, sold: old ? old.sold : 0, comped: old ? (old.comped || 0) : 0 };
+    // optional: when this ticket type goes on sale (a countdown shows until then)
+    let salesStart = null;
+    if (t.salesStart !== undefined && t.salesStart !== null && String(t.salesStart).trim() !== '') {
+      const d = new Date(t.salesStart);
+      if (isNaN(d)) fail(400, `Sales start for "${name}" is not a valid date and time`);
+      if (d >= end) fail(400, `Sales for "${name}" must start before the event ends`);
+      salesStart = d.toISOString();
+    }
+    return { id: old ? old.id : newId('tier'), name, description, visibility, kind, price, ...(kind === 'donation' ? { suggested } : {}), salesStart, quantity, sold: old ? old.sold : 0, comped: old ? (old.comped || 0) : 0 };
   });
   for (const o of oldTiers) {
     if (o.sold > 0 && !tiers.some((t) => t.id === o.id)) fail(400, `"${o.name}" has sales and can't be removed`);
@@ -974,6 +987,7 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
     if (!Number.isInteger(qty) || qty < 0 || qty > 10) fail(400, 'You can buy up to 10 of each ticket type');
     const tier = ev.tiers.find((t) => t.id === it.tierId && isPublicTier(t)) || fail(400, 'Unknown ticket type');
     if (tier.quantity - tier.sold < qty) fail(409, `Only ${tier.quantity - tier.sold} "${tier.name}" tickets left`);
+    if (!tierOnSale(tier)) fail(400, `"${tier.name}" tickets are not on sale yet`);
     // Donation tickets: the buyer picks the amount (per ticket), at least the organizer's minimum
     let unit = tierKind(tier) === 'free' ? 0 : tier.price;
     if (tierKind(tier) === 'donation') {

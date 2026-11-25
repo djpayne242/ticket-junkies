@@ -1043,6 +1043,16 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 @media (max-width: 1000px) { .tj-root .tier-row { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 640px) { .tj-root .tier-row { grid-template-columns: 1fr; } }
 
+/* ticket types that are not on sale yet */
+.tj-root .tier.tier-soon { opacity: .95; }
+.tj-root .cd-chip.sale { color: #c65a16; background: rgba(235, 116, 42, .14); white-space: nowrap; }
+:root[data-theme="dark"] .tj-root .cd-chip.sale { color: #f5a36d; background: rgba(235, 116, 42, .2); }
+.tj-root .cd-chip.sale.is-live { color: #3f8a22; background: rgba(132, 214, 95, .2); }
+.tj-root .badge.soon { background: rgba(235, 116, 42, .16); color: #c65a16; }
+:root[data-theme="dark"] .tj-root .badge.soon { color: #f5a36d; }
+.tj-root .tier-row .tier-sale-field { grid-column: 1 / -1; }
+.tj-root .tier-row .tier-sale-field input { max-width: 320px; }
+
 
 /* =========================================================
    WordPress / Elementor integration

@@ -65,14 +65,16 @@ function priceText(kind, min, many = true) {
   if (kind === 'free' || min === 0) return 'Free';
   return many ? `From ${money(min)}` : money(min);
 }
+const tierOnSaleNow = (t) => !t.salesStart || new Date(t.salesStart).getTime() <= Date.now();
+function nextSaleStart(ev) { return ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private' && !tierOnSaleNow(t)).map((t) => t.salesStart).sort()[0] || null; }
 function lowestTier(ev) {
-  const open = ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private');
+  const open = ev.tiers.filter((t) => t.remaining > 0 && t.visibility !== 'private' && tierOnSaleNow(t));
   if (!open.length) return null;
   return open.reduce((a, t) => (t.price < a.price || (t.price === a.price && tierKindOf(t) === 'paid') ? t : a), open[0]);
 }
 function priceFrom(ev) {
   const t = lowestTier(ev);
-  if (!t) return '<span class="badge soldout">Sold out</span>';
+  if (!t) return nextSaleStart(ev) ? '<span class="badge soon">On sale soon</span>' : '<span class="badge soldout">Sold out</span>';
   return esc(priceText(tierKindOf(t), t.price, ev.tiers.filter((x) => x.visibility !== 'private').length > 1));
 }
 
@@ -85,7 +87,7 @@ function countdownState(startsAt, endsAt) {
 }
 function countdownHtml(ev, big = false) {
   const attrs = `data-cd="${esc(ev.startsAt)}" data-cd-end="${esc(ev.endsAt)}"`;
-  if (big) return `<div class="cd-big" ${attrs} aria-live="off"><div class="cd-big-label">⏳ Event starts in</div><div class="cd-big-boxes">${['Days', 'Hours', 'Minutes', 'Seconds'].map((l, i) => `<div class="cd-box"><b data-cd-u="${i}">--</b><span>${l}</span></div>`).join('')}</div><div class="cd-big-msg"></div></div>`;
+  if (big) return `<div class="cd-big" ${attrs} aria-live="off"><div class="cd-big-label">⏳ This event goes live in</div><div class="cd-big-boxes">${['Days', 'Hours', 'Minutes', 'Seconds'].map((l, i) => `<div class="cd-box"><b data-cd-u="${i}">--</b><span>${l}</span></div>`).join('')}</div><div class="cd-big-msg"></div></div>`;
   return `<span class="cd-chip" ${attrs}>⏳ <span class="cd-txt">…</span></span>`;
 }
 function tickCountdowns() {
@@ -95,12 +97,19 @@ function tickCountdowns() {
     const c = cdParts(new Date(el.dataset.cd).getTime() - Date.now());
     if (el.classList.contains('cd-big')) {
       const msg = el.querySelector('.cd-big-msg'), boxes = el.querySelector('.cd-big-boxes'), lbl = el.querySelector('.cd-big-label');
-      if (state !== 'soon') { boxes.style.display = 'none'; lbl.style.display = 'none'; msg.textContent = state === 'live' ? '🔴 Happening now!' : 'This event has ended'; return; }
+      if (state !== 'soon') { boxes.style.display = 'none'; lbl.style.display = 'none'; msg.textContent = state === 'live' ? '🔴 This event is LIVE now!' : 'This event has ended'; return; }
       [c.d, p2(c.h), p2(c.m), p2(c.s)].forEach((v, i) => { const b = el.querySelector(`[data-cd-u="${i}"]`); if (b && b.textContent !== String(v)) b.textContent = v; });
       return;
     }
     const t = el.querySelector('.cd-txt') || el;
-    t.textContent = state === 'live' ? 'Happening now' : state === 'ended' ? 'Ended' : `Starts in ${c.d ? c.d + 'd ' : ''}${p2(c.h)}h ${p2(c.m)}m ${p2(c.s)}s`;
+    const left = `${c.d ? c.d + 'd ' : ''}${p2(c.h)}h ${p2(c.m)}m ${p2(c.s)}s`;
+    if (el.dataset.cdKind === 'sale') {
+      // ticket type countdown: until its sales start
+      t.textContent = state === 'soon' ? `On sale in ${left}` : 'On sale now';
+      if (state !== 'soon' && !el.dataset.cdFired) { el.dataset.cdFired = '1'; el.dispatchEvent(new CustomEvent('tj:onsale', { bubbles: true })); }
+      return;
+    }
+    t.textContent = state === 'live' ? 'Live now' : state === 'ended' ? 'Ended' : `Goes live in ${left}`;
   });
 }
 let cdTimer = null;
@@ -491,7 +500,7 @@ function openCalendarDay(day, evs, hols, routeFix) {
     const img = e.imageUrl
       ? `<img src="${esc(e.imageUrl)}" alt="${esc(e.title)} flyer" loading="lazy" decoding="async" />`
       : `<div class="cal-pop-noimg" style="background:linear-gradient(135deg,${(CAT_STYLE[e.category] || ['#376eb8', '#84d65f'])[0]},${(CAT_STYLE[e.category] || ['#376eb8', '#84d65f'])[1]})"><span>${(CAT_STYLE[e.category] || [, , '🎟️'])[2]}</span></div>`;
-    const price = e.ended ? '<span class="badge">Ended</span>' : e.soldOut ? '<span class="badge soldout">Sold out</span>' : `<strong class="cal-pop-price">${esc(calMoney(e.priceFrom, e.priceKind))}</strong>`;
+    const price = e.ended ? '<span class="badge">Ended</span>' : e.soldOut ? '<span class="badge soldout">Sold out</span>' : e.priceFrom === null && e.salesStart ? '<span class="badge soon">On sale soon</span>' : `<strong class="cal-pop-price">${esc(calMoney(e.priceFrom, e.priceKind))}</strong>`;
     return `<article class="cal-pop-ev${e.ended ? ' ended' : ''}">
       <a class="cal-pop-flyer" href="${link}">${img}</a>
       <div class="cal-pop-body">
@@ -673,6 +682,13 @@ async function pageEvent(id) {
           ${t.description ? `<div class="tier-desc">${esc(t.description)}</div>` : ''}
           <div class="muted small">Hidden from the public · ${t.remaining} left · <a href="#/attendees/${esc(ev.id)}">Send complimentary tickets</a></div></div>
       </div>`;
+      if (!tierOnSaleNow(t)) return `<div class="tier tier-soon">
+        <div><div class="tier-name">${esc(t.name)}</div>
+          ${t.description ? `<div class="tier-desc">${esc(t.description)}</div>` : ''}
+          <div class="small">${tierKindOf(t) === 'donation' ? `<span class="kind-badge donation">💝 Donation</span> ${t.price > 0 ? 'Minimum ' + money(t.price) : 'Pay what you want'}` : tierKindOf(t) === 'free' || t.price === 0 ? '<span class="kind-badge free">🎁 Free</span>' : `<strong>${money(t.price)}</strong> <span class="muted">+ ${money(t.fee)} fee</span>`}</div>
+          <div class="muted small">On sale ${esc(fmtLong(t.salesStart))}</div></div>
+        <span class="cd-chip sale" data-cd-kind="sale" data-cd="${esc(t.salesStart)}" data-cd-end="${esc(ev.endsAt)}">🕒 <span class="cd-txt">…</span></span>
+      </div>`;
       const max = Math.min(10, t.remaining);
       const opts = Array.from({ length: max + 1 }, (_, i) => `<option ${i === qty[t.id] ? 'selected' : ''}>${i}</option>`).join('');
       return `<div class="tier">
@@ -709,6 +725,8 @@ async function pageEvent(id) {
     };
   }
 
+  // a ticket type's sales just opened → show its quantity picker
+  panel.addEventListener('tj:onsale', () => setTimeout(renderPicker, 300));
   // restore cart after login redirect
   try {
     const saved = JSON.parse(sessionStorage.getItem('tj_cart') || 'null');
@@ -1038,7 +1056,8 @@ async function pageEventForm(id) {
   const def = new Date(Date.now() + 14 * 86400000); def.setHours(20, 0, 0, 0);
   const defEnd = new Date(def.getTime() + 4 * 3600000);
   const v = ev || { title: '', category: META.categories[0], description: '', startsAt: def.toISOString(), endsAt: defEnd.toISOString(), venue: '', address: '', city: '', imageUrl: '', status: 'published', tiers: [{ name: 'General Admission', price: 25, quantity: 100, sold: 0 }] };
-  let tiers = v.tiers.map((t) => ({ ...t, kind: tierKindOf(t), suggested: t.suggested ?? '' }));
+  const isoToLocalInput = (iso) => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; const z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`; };
+  let tiers = v.tiers.map((t) => ({ ...t, kind: tierKindOf(t), suggested: t.suggested ?? '', salesStart: isoToLocalInput(t.salesStart) }));
   let imageUrl = v.imageUrl;
   let imageShareUrl = v.imageShareUrl || '';
   const dir = await api('/api/directory').catch(() => ({ organizers: [], venues: [] }));
@@ -1271,6 +1290,7 @@ async function pageEventForm(id) {
       tiers[i].kind = row.querySelector('[data-k=kind]').value;
       tiers[i].price = tiers[i].kind === 'free' ? 0 : row.querySelector('[data-k=price]').value;
       tiers[i].suggested = row.querySelector('[data-k=suggested]').value;
+      tiers[i].salesStart = row.querySelector('[data-k=salesStart]').value;
       tiers[i].quantity = row.querySelector('[data-k=quantity]').value;
       tiers[i].description = row.querySelector('[data-k=description]').value;
       tiers[i].visibility = row.querySelector('[data-k=visibility]').value;
@@ -1291,6 +1311,7 @@ async function pageEventForm(id) {
           <option value="public" ${t.visibility !== 'private' ? 'selected' : ''}>🌐 Public — on sale</option>
           <option value="private" ${t.visibility === 'private' ? 'selected' : ''}>🔒 Private — hidden</option></select></div>
         <button type="button" class="btn btn-danger btn-sm" data-rm="${i}" ${t.sold || tiers.length === 1 ? 'disabled' : ''}>✕</button>
+        <div class="field tier-sale-field"><label>Sales start <span class="muted small">(optional)</span></label><input data-k="salesStart" type="datetime-local" value="${esc(t.salesStart || '')}" /><span class="muted small">Leave empty to sell right away. Buyers see a countdown until then.</span></div>
         <div class="field tier-desc-field"><label>Description <span class="muted small">(optional)</span></label><input data-k="description" maxlength="300" value="${esc(t.description || '')}" placeholder="e.g. Includes 1 free drink and fast-track entry" /></div>
       </div>`).join('');
     document.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => { syncTiers(); tiers.splice(Number(b.dataset.rm), 1); renderTiers(); }));
@@ -1306,7 +1327,7 @@ async function pageEventForm(id) {
   document.getElementById('addTier').onclick = () => {
     syncTiers();
     if (tiers.length >= 10) return toast('Maximum 10 ticket types', true);
-    tiers.push({ name: '', kind: 'paid', price: '', suggested: '', quantity: 50, sold: 0, description: '', visibility: 'public' }); renderTiers();
+    tiers.push({ name: '', kind: 'paid', price: '', suggested: '', salesStart: '', quantity: 50, sold: 0, description: '', visibility: 'public' }); renderTiers();
   };
 
   // ---- schedule: times a day × days (create only) ----
@@ -1438,7 +1459,8 @@ async function pageEventForm(id) {
     const body = {
       ...f, ...extra, imageUrl, imageShareUrl, lat: geo.lat, lng: geo.lng, geoPrecision: geo.geoPrecision,
       startsAt: new Date(f.startsAt).toISOString(), endsAt: new Date(f.endsAt).toISOString(),
-      tiers: tiers.map((t) => ({ id: t.id, name: t.name, price: Number(t.price), quantity: Number(t.quantity), description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public' })),
+      tiers: tiers.map((t) => ({ id: t.id, name: t.name, kind: t.kind || 'paid', price: t.kind === 'free' ? 0 : Number(t.price), suggested: t.kind === 'donation' && t.suggested !== '' && t.suggested !== null && t.suggested !== undefined ? Number(t.suggested) : null,
+        salesStart: t.salesStart ? new Date(t.salesStart).toISOString() : null, quantity: Number(t.quantity), description: t.description || '', visibility: t.visibility === 'private' ? 'private' : 'public' })),
     };
     const btn = document.getElementById('saveBtn'); btn.disabled = true;
     try {

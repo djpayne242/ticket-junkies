@@ -26,7 +26,9 @@ The owner account controls the Admin Panel and can also post events ("My Events"
 
 **Ticket types (Paid / Free / Donation):** every ticket type has a Ticket type box. Paid = fixed price above $0. Free = $0 (the price box hides; free-only orders skip the card form). Donation = the buyer chooses the amount per ticket, at least the organizer's Minimum donation (can be $0 for pay-what-you-want), with an optional Suggested amount that is pre-filled. Service fees are worked out on the amount actually paid. Once a ticket type has sales its type and price/minimum are locked. Revenue in dashboards and reports counts what donors actually gave. Older ticket types without a type count as Paid (price above $0) or Free ($0).
 
-**Countdowns:** every event card shows a live "⏳ Starts in 3d 04h 12m 09s" chip, the event page has a large Days / Hours / Minutes / Seconds countdown, and the calendar pop-up shows one too. When an event starts it switches to "Happening now", then "Ended".
+**Countdowns:** every event card shows a live "⏳ Goes live in 3d 04h 12m 09s" chip counting down to the event's start time, the event page has a large "This event goes live in" Days / Hours / Minutes / Seconds countdown, and the calendar pop-up shows one too. When the event starts it switches to "Live now" ("🔴 This event is LIVE now!" on the event page), then "Ended".
+
+**Ticket sales start (per ticket type):** each ticket type has an optional Sales start date and time (e.g. Early Bird now, Second Release next Friday). Until then the ticket shows its price and "🕒 On sale in 2d 03h 10m 05s" instead of a quantity picker, and the server refuses purchases. When the countdown reaches zero the picker appears without reloading. Sales start must be before the event ends. Event cards and the calendar show "On sale soon" when no ticket type is on sale yet.
 
 **Event cards:** each card shows the lowest available price ("From $25.00", "Free", "Donation · from $5.00" or "Pay what you want") next to an orange "Get tickets →" button; sold-out events show "Sold out" and "View event".
 
