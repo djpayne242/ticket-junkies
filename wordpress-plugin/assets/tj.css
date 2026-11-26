@@ -1283,6 +1283,46 @@ html[data-tj-app] .tj-root .scan-app.scanning .scan-stage { max-height: 48vh; }
 html[data-tj-app] .tj-root .nav { top: 100%; max-height: 70vh; }
 html[data-tj-app] .tj-root .topbar-inner .cart-btn { margin-left: auto; }
 
+/* ---------- Door Scanner button on the organizer dashboard ---------- */
+.tj-root .dash-scan { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; padding: 16px 18px; border-radius: 18px; color: #fff; background: linear-gradient(120deg, #376eb8 0%, #2a5a9c 55%, #eb742a 130%); box-shadow: 0 8px 24px rgba(55,110,184,.28); }
+.tj-root .dash-scan:hover { text-decoration: none; filter: brightness(1.05); }
+.tj-root .dash-scan .ds-icon { width: 54px; height: 54px; flex: none; display: grid; place-items: center; font-size: 1.8rem; border-radius: 14px; background: rgba(255,255,255,.18); }
+.tj-root .dash-scan .ds-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.tj-root .dash-scan .ds-text strong { font-size: 1.3rem; line-height: 1.15; }
+.tj-root .dash-scan .ds-text span { font-size: .92rem; opacity: .92; }
+.tj-root .dash-scan .ds-go { font-size: 1.6rem; font-weight: 800; }
+@media (max-width: 640px) { .tj-root .dash-scan { margin-top: -6px; padding: 18px 16px; } .tj-root .dash-scan .ds-text strong { font-size: 1.4rem; } }
+
+/* ---------- Guest list & check-ins (inside the scanner) ---------- */
+.tj-root .gl { margin-top: 18px; }
+.tj-root .gl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 22px 0 10px; }
+.tj-root .gl-head .scan-h { margin: 0; }
+.tj-root .gl-add { display: grid; gap: 8px; padding: 14px; margin-bottom: 10px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); }
+.tj-root .gl-add[hidden] { display: none; }
+.tj-root .gl-add input { width: 100%; padding: 11px 13px; border-radius: 10px; border: 1px solid var(--field-line, var(--line)); background: var(--card); color: var(--ink); font-size: 1rem; }
+.tj-root .gl-add-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tj-root .gl-add-row > input { flex: 1; min-width: 160px; }
+.tj-root .gl-add-row label { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--muted); }
+.tj-root .gl-add-row label input { width: 72px; }
+.tj-root .gl-search { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--field-line, var(--line)); background: var(--card); color: var(--ink); font-size: 1rem; }
+.tj-root .gl-tabs { display: flex; gap: 6px; margin: 10px 0; overflow-x: auto; }
+.tj-root .gl-tabs button { flex: 1; white-space: nowrap; padding: 9px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; }
+.tj-root .gl-tabs button b { display: inline-block; min-width: 22px; margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: var(--bg); font-size: .8rem; }
+.tj-root .gl-tabs button.on { background: #376eb8; border-color: #376eb8; color: #fff; }
+.tj-root .gl-tabs button.on b { background: rgba(255,255,255,.22); }
+.tj-root .gl-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.tj-root .gl-row { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); border-left: 4px solid #eb742a; }
+.tj-root .gl-row.in { border-left-color: #84d65f; }
+.tj-root .gl-main { flex: 1; min-width: 0; }
+.tj-root .gl-main strong { word-break: break-word; }
+.tj-root .gl-main .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tj-root .gl-act { display: flex; align-items: center; gap: 6px; flex: none; }
+.tj-root .gl-act .btn { min-height: 40px; }
+.tj-root .gl-badge { display: inline-block; margin-left: 4px; padding: 1px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700; color: #fff; background: #376eb8; vertical-align: 2px; }
+.tj-root .gl-del { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; font-size: .9rem; }
+.tj-root .gl-del:hover { color: #c0392b; border-color: #c0392b; }
+.tj-root .gl-empty { padding: 16px; text-align: center; border-radius: 12px; border: 1px dashed var(--line); }
+
 
 /* =========================================================
    WordPress / Elementor integration

@@ -317,6 +317,15 @@ In **Create Event → Date & time** there are two dropdowns:
   - **Location:** "Choose a saved venue" fills in the main venue, address, city and map pin. **More venues** adds extra places for events held at more than one venue (up to 10 in total). Pick a saved venue or type one in; a saved venue's address fills in by itself.
   - **Event page:** lists every venue with its own Directions link. Event cards show "+N venues".
 
+## 🚪 Door Scanner on the dashboard + guest list (v1.3.2)
+- **Door Scanner button:** a big blue **📷 Door Scanner** button now sits at the very top of the Organizer Dashboard, so it's the first thing organizers see when they log in on their phone. It opens the scanner (`#/scan`), where they pick the event.
+- **Who's in and who isn't:** under the camera, the scanner shows **Guest list & check-ins** with three tabs: **Not checked in**, **Checked in** (with the time) and **Everyone**, each with a count. The big counter at the top counts everyone expected, including extra guests.
+- **Search:** type any part of a name, email or ticket code to find someone straight away (accents and capitals don't matter).
+- **Guest list (typed in by hand):** **+ Add name** takes a name, plus optional email, number of extra guests (0–20, e.g. "+2") and a note (VIP, DJ, press…). Guest-list names show a blue *Guest list* badge, are checked in with one tap, can be un-checked (**Undo**) or removed (**✕**), and are deleted along with their event.
+- Ticket holders can also be checked in by tapping **Check in** in the list (handy when a phone screen won't scan). The list refreshes every 30 seconds so several door staff stay in sync.
+- Only the event's organizer (or an admin) can see or change its guest list; it is never shown publicly. Up to 2,000 names per event.
+- New API: `GET/POST /api/organizer/events/:id/guests`, `DELETE …/guests/:gid`, `POST …/guests/:gid/checkin` (`{undo:true}` to reverse). WordPress: same routes under `/wp-json/tj/v1/`, stored in the option `tj_guests_<eventId>`.
+
 ## 📲 Mobile apps (v1.3.0, v1.3.1)
 - **v1.3.1, store app look:** inside the App Store / Google Play app the site turns into a phone app: a bottom tab bar (**Events · Tickets · Scan** for organizers or **Cart** for attendees **· Account**), a compact header with the TicketJunkies logo, no website footer, and spacing for the phone's notch and home bar. New app icon (the three-ticket artwork) for the store app, the home-screen app and TJ Scanner.
 - **Install as an app (iPhone, Android, computer):** visitors get a small *Get the app* bar on phones and a **📲 Get the app** page (footer link, `#/app`). On Android/Chrome it installs in one tap; on iPhone it shows the 3 Safari steps (Share → Add to Home Screen).

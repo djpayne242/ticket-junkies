@@ -1202,6 +1202,7 @@ route('DELETE', '/api/events/:id', ({ req, params }) => {
     return { ok: true, cancelled: true, message: 'Event has ticket sales, so it was cancelled instead of deleted.' };
   }
   db.events = db.events.filter((e) => e.id !== ev.id);
+  if (db.guests) db.guests = db.guests.filter((g) => g.eventId !== ev.id);
   saveDb();
   Notify.eventDeleted(ev, user);
   return { ok: true, deleted: true };
@@ -1423,6 +1424,59 @@ route('POST', '/api/organizer/checkin', ({ req, body }) => {
     return { ok: true, ticket: { code, tierName: t.tierName, buyerName: t.holderName || o.buyerName } };
   }
   fail(404, `No ticket ${code} for this event`);
+});
+
+// ---------- guest list (names the organizer types in, checked in by tapping at the door) ----------
+function guestOut(g) {
+  return { id: g.id, name: g.name, email: g.email || '', note: g.note || '', plus: g.plus || 0, addedAt: g.addedAt, addedBy: g.addedBy || '', checkedIn: !!g.checkedIn, checkedInAt: g.checkedInAt || null };
+}
+function guestInput(body) {
+  const name = str(body.name, { name: 'Name', max: 80, required: true });
+  const email = str(body.email, { name: 'Email', max: 160 }).toLowerCase();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'Enter a valid email address (or leave it empty)');
+  const note = str(body.note, { name: 'Note', max: 120 });
+  const plus = Math.round(Number(body.plus) || 0);
+  if (plus < 0 || plus > 20) fail(400, 'Extra guests must be between 0 and 20');
+  return { name, email, note, plus };
+}
+route('GET', '/api/organizer/events/:id/guests', ({ req, params }) => {
+  const user = requireOrganizer(req);
+  const ev = ownedEvent(user, params.id);
+  return { guests: (db.guests ||= []).filter((g) => g.eventId === ev.id).map(guestOut) };
+});
+route('POST', '/api/organizer/events/:id/guests', ({ req, params, body }) => {
+  const user = requireOrganizer(req);
+  const ev = ownedEvent(user, params.id);
+  const list = (db.guests ||= []);
+  if (list.filter((g) => g.eventId === ev.id).length >= 2000) fail(400, 'The guest list is full (2,000 names)');
+  const g = { id: newId('gst'), eventId: ev.id, ...guestInput(body), addedAt: new Date().toISOString(), addedBy: user.name, checkedIn: false, checkedInAt: null };
+  list.push(g);
+  saveDb();
+  return { guest: guestOut(g) };
+});
+const ownedGuest = (user, params) => {
+  const ev = ownedEvent(user, params.id);
+  const g = (db.guests ||= []).find((x) => x.id === params.gid && x.eventId === ev.id);
+  if (!g) fail(404, 'That name is not on the guest list');
+  return g;
+};
+route('DELETE', '/api/organizer/events/:id/guests/:gid', ({ req, params }) => {
+  const user = requireOrganizer(req);
+  const g = ownedGuest(user, params);
+  db.guests = db.guests.filter((x) => x !== g);
+  saveDb();
+  return { ok: true };
+});
+route('POST', '/api/organizer/events/:id/guests/:gid/checkin', ({ req, params, body }) => {
+  const user = requireOrganizer(req);
+  const g = ownedGuest(user, params);
+  if (body.undo) { g.checkedIn = false; g.checkedInAt = null; }
+  else {
+    if (g.checkedIn) fail(409, `${g.name} was already checked in`);
+    g.checkedIn = true; g.checkedInAt = new Date().toISOString();
+  }
+  saveDb();
+  return { guest: guestOut(g) };
 });
 
 route('POST', '/api/upload', ({ req, body }) => {

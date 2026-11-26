@@ -1547,6 +1547,11 @@ async function pageDashboard() {
       </div></td></tr>`;
   }).join('');
   $app.innerHTML = `
+    <a class="dash-scan" href="#/scan">
+      <span class="ds-icon" aria-hidden="true">📷</span>
+      <span class="ds-text"><strong>Door Scanner</strong><span>Scan tickets, see who's checked in and manage your guest list</span></span>
+      <span class="ds-go" aria-hidden="true">→</span>
+    </a>
     <div class="section-head"><div><h1>Organizer Dashboard</h1><div class="muted">${esc(me.organization || me.name)}</div></div><div class="actions"><a class="btn btn-ghost" href="#/reports">📈 Sales reports</a><a class="btn btn-primary" href="#/create">+ Create Event</a></div></div>
     <div class="stats">
       <div class="stat"><div class="muted small">Events</div><div class="num">${events.length}</div></div>
@@ -3441,9 +3446,22 @@ async function pageScan(eventId) {
   if (!ev) { $app.innerHTML = '<div class="empty"><div class="big">🔒</div><h2>Event not found</h2><p class="muted">You can only scan tickets for your own events.</p><a class="btn btn-primary" href="#/scan">Choose an event</a></div>'; return; }
   try { localStorage.setItem('tj_scan_event', ev.id); } catch {}
   let soundOn = true; try { soundOn = localStorage.getItem('tj_scan_sound') !== 'off'; } catch {}
-  // Count every valid ticket on the guest list (paid, complimentary and test tickets)
-  let checkedIn = ev.stats.checkedIn, total = ev.stats.sold;
-  try { const g = await api('/api/organizer/events/' + encodeURIComponent(ev.id) + '/attendees'); total = g.attendees.length; checkedIn = g.attendees.filter((x) => x.checkedIn).length; } catch {}
+  // Everyone expected at the door: every valid ticket (paid, complimentary and test) plus the names on the guest list
+  const evPath = '/api/organizer/events/' + encodeURIComponent(ev.id);
+  let people = [];
+  const loadPeople = async () => {
+    const [a, g] = await Promise.all([api(evPath + '/attendees'), api(evPath + '/guests').catch(() => ({ guests: [] }))]);
+    people = [
+      ...a.attendees.map((t) => ({ kind: 'ticket', key: 't:' + t.code, code: t.code, name: t.holderName || t.buyerName || 'Guest', email: t.holderEmail || t.buyerEmail || '', sub: t.tierName + (t.comp ? ' · complimentary' : '') + (t.test ? ' · test' : ''), checkedIn: !!t.checkedIn, checkedInAt: t.checkedInAt, count: 1 })),
+      ...g.guests.map(guestPerson),
+    ].sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: 'base' }));
+  };
+  function guestPerson(g) {
+    return { kind: 'guest', key: 'g:' + g.id, id: g.id, code: '', name: g.name, email: g.email, note: g.note, plus: g.plus, sub: 'Guest list' + (g.plus ? ` · +${g.plus} guest${g.plus > 1 ? 's' : ''}` : '') + (g.note ? ' · ' + g.note : ''), checkedIn: g.checkedIn, checkedInAt: g.checkedInAt, count: 1 + (g.plus || 0) };
+  }
+  try { await loadPeople(); } catch {}
+  const tally = () => ({ inn: people.reduce((a, p) => a + (p.checkedIn ? p.count : 0), 0), total: people.reduce((a, p) => a + p.count, 0) });
+  let { inn: checkedIn, total } = people.length ? tally() : { inn: ev.stats.checkedIn, total: ev.stats.sold };
   $app.innerHTML = `
     <div class="scan-app scanning">
       <div class="scan-top">
@@ -3464,12 +3482,112 @@ async function pageScan(eventId) {
       <div class="scan-tools">
         <button type="button" class="btn btn-ghost btn-sm" id="scanSound">${soundOn ? '🔊 Sound on' : '🔇 Sound off'}</button>
         <button type="button" class="btn btn-ghost btn-sm" id="scanFlip">🔄 Switch camera</button>
-        <a class="btn btn-ghost btn-sm" href="#/attendees/${esc(ev.id)}">👥 Guest list</a>
+        <a class="btn btn-ghost btn-sm" href="#/attendees/${esc(ev.id)}">📋 Attendee page</a>
         ${isStandalone() ? '' : '<button type="button" class="btn btn-ghost btn-sm" data-install="scanner">📲 Install scanner app</button>'}
       </div>
+      <section class="gl" aria-label="Guest list and check-ins">
+        <div class="gl-head"><h3 class="scan-h">👥 Guest list & check-ins</h3><button type="button" class="btn btn-primary btn-sm" id="glAddBtn">+ Add name</button></div>
+        <form id="glAdd" class="gl-add" autocomplete="off" hidden>
+          <input name="name" placeholder="Full name *" maxlength="80" required />
+          <input name="email" type="email" placeholder="Email (optional)" maxlength="160" />
+          <div class="gl-add-row">
+            <label class="small">Extra guests <input name="plus" type="number" min="0" max="20" value="0" inputmode="numeric" /></label>
+            <input name="note" placeholder="Note, e.g. VIP, DJ, press (optional)" maxlength="120" />
+          </div>
+          <div class="gl-add-row"><button class="btn btn-green">Add to guest list</button><button type="button" class="btn btn-ghost" id="glAddCancel">Cancel</button></div>
+        </form>
+        <input type="search" id="glSearch" class="gl-search" placeholder="🔍 Search name, email or ticket code" autocomplete="off" />
+        <div class="gl-tabs" role="tablist">
+          <button type="button" role="tab" data-f="out" class="on">Not checked in <b id="glNOut">0</b></button>
+          <button type="button" role="tab" data-f="in">Checked in <b id="glNIn">0</b></button>
+          <button type="button" role="tab" data-f="all">Everyone <b id="glNAll">0</b></button>
+        </div>
+        <ul class="gl-list" id="glList"></ul>
+      </section>
       <h3 class="scan-h">Recent scans</h3>
       <ul class="scan-log" id="scanLog"><li class="muted small">Scans from this phone show up here.</li></ul>
     </div>`;
+  // ----- guest list & check-ins (search, filter, tap to check in, manual names) -----
+  const $gl = document.getElementById('glList');
+  let glFilter = 'out', glQuery = '';
+  const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const renderList = () => {
+    const t = tally(); checkedIn = t.inn; total = t.total;
+    document.getElementById('scIn').textContent = checkedIn;
+    document.getElementById('scTot').textContent = total;
+    const nIn = people.filter((p) => p.checkedIn).length;
+    document.getElementById('glNIn').textContent = nIn;
+    document.getElementById('glNOut').textContent = people.length - nIn;
+    document.getElementById('glNAll').textContent = people.length;
+    const q = norm(glQuery.trim());
+    const rows = people.filter((p) => (glFilter === 'all' || (glFilter === 'in') === p.checkedIn) && (!q || norm(p.name + ' ' + p.email + ' ' + p.code + ' ' + (p.note || '')).includes(q)));
+    if (!rows.length) {
+      $gl.innerHTML = `<li class="gl-empty muted">${q ? 'Nobody matches “' + esc(glQuery.trim()) + '”.' : glFilter === 'in' ? 'Nobody has checked in yet.' : glFilter === 'out' && people.length ? '🎉 Everyone is checked in!' : 'No tickets sold or names added yet. Tap <strong>+ Add name</strong> to start a guest list.'}</li>`;
+      return;
+    }
+    const shown = rows.slice(0, 300);
+    $gl.innerHTML = shown.map((p) => `<li class="gl-row ${p.checkedIn ? 'in' : 'out'}">
+        <div class="gl-main"><strong>${esc(p.name)}</strong>${p.kind === 'guest' ? ' <span class="gl-badge">Guest list</span>' : ''}
+          <div class="muted small">${esc(p.kind === 'guest' ? p.sub : p.sub + ' · ' + p.code)}${p.email ? ' · ' + esc(p.email) : ''}</div></div>
+        <div class="gl-act">${p.checkedIn
+          ? `<span class="checked">✓ In${p.checkedInAt ? ' ' + esc(fmtTime(p.checkedInAt)) : ''}</span>${p.kind === 'guest' ? `<button type="button" class="btn btn-ghost btn-sm" data-glundo="${esc(p.key)}">Undo</button>` : ''}`
+          : `<button type="button" class="btn btn-green btn-sm" data-glin="${esc(p.key)}">Check in</button>`}
+          ${p.kind === 'guest' ? `<button type="button" class="gl-del" data-gldel="${esc(p.key)}" title="Remove from guest list" aria-label="Remove ${esc(p.name)}">✕</button>` : ''}</div>
+      </li>`).join('') + (rows.length > shown.length ? `<li class="gl-empty muted small">Showing 300 of ${rows.length}. Search to find someone.</li>` : '');
+  };
+  const markIn = (key, at) => { const p = people.find((x) => x.key === key); if (p && !p.checkedIn) { p.checkedIn = true; p.checkedInAt = at || new Date().toISOString(); } renderList(); };
+  const guestCall = async (p, undo) => {
+    const r = await api(evPath + '/guests/' + encodeURIComponent(p.id) + '/checkin', { method: 'POST', body: undo ? { undo: true } : {} });
+    Object.assign(p, guestPerson(r.guest));
+    renderList();
+    return r.guest;
+  };
+  document.getElementById('glSearch').oninput = (e) => { glQuery = e.target.value; if (glQuery.trim() && glFilter !== 'all') { glFilter = 'all'; document.querySelectorAll('.gl-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.f === 'all')); } renderList(); };
+  document.querySelectorAll('.gl-tabs button').forEach((b) => (b.onclick = () => { glFilter = b.dataset.f; document.querySelectorAll('.gl-tabs button').forEach((x) => x.classList.toggle('on', x === b)); renderList(); }));
+  const $add = document.getElementById('glAdd');
+  document.getElementById('glAddBtn').onclick = () => { $add.hidden = !$add.hidden; if (!$add.hidden) $add.elements.name.focus(); };
+  document.getElementById('glAddCancel').onclick = () => { $add.hidden = true; $add.reset(); };
+  $add.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData($add));
+    const btn = $add.querySelector('.btn-green'); btn.disabled = true;
+    try {
+      const r = await api(evPath + '/guests', { method: 'POST', body: { name: f.name, email: f.email, note: f.note, plus: Number(f.plus) || 0 } });
+      people.push(guestPerson(r.guest));
+      people.sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: 'base' }));
+      $add.reset(); $add.elements.name.focus();
+      toast(`✓ ${r.guest.name} added to the guest list`);
+      renderList();
+    } catch (err) { toast(err.message, true); } finally { btn.disabled = false; }
+  };
+  $gl.onclick = async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const key = b.dataset.glin || b.dataset.glundo || b.dataset.gldel; if (!key) return;
+    const p = people.find((x) => x.key === key); if (!p) return;
+    if (b.dataset.glin) {
+      if (p.kind === 'ticket') return checkin(p.code);
+      b.disabled = true;
+      try {
+        const g = await guestCall(p, false);
+        show('ok', 'Admit ' + g.name, 'Guest list' + (g.plus ? ` · +${g.plus} (${1 + g.plus} people)` : '') + (g.note ? ' · ' + g.note : ''));
+        addLog('ok', 'GUEST', g.name + (g.plus ? ` +${g.plus}` : ''));
+        scanFeedback('ok', soundOn);
+      } catch (err) { show(err.status === 409 ? 'warn' : 'bad', err.status === 409 ? 'Already checked in' : 'Not checked in', err.message); scanFeedback('bad', soundOn); if (err.status === 409) markIn(key); else b.disabled = false; }
+    } else if (b.dataset.glundo) {
+      if (!confirm(`Mark ${p.name} as NOT checked in?`)) return;
+      try { await guestCall(p, true); toast(`${p.name} marked as not checked in`); } catch (err) { toast(err.message, true); }
+    } else if (b.dataset.gldel) {
+      if (!confirm(`Remove ${p.name} from the guest list?`)) return;
+      try { await api(evPath + '/guests/' + encodeURIComponent(p.id), { method: 'DELETE' }); people = people.filter((x) => x !== p); renderList(); toast(`${p.name} removed`); } catch (err) { toast(err.message, true); }
+    }
+  };
+  renderList();
+  // Keep the list fresh when several people check guests in at the same door
+  const glTimer = setInterval(async () => {
+    if (!document.body.contains($gl)) { clearInterval(glTimer); return; }
+    if (document.hidden || busy) return;
+    try { await loadPeople(); if (document.body.contains($gl)) renderList(); } catch {}
+  }, 30000);
   const $res = document.getElementById('scanResult');
   const $log = document.getElementById('scanLog');
   let facing = 'environment', busy = false, lastCode = '', lastAt = 0, resetTimer = 0, logged = 0;
@@ -3492,7 +3610,7 @@ async function pageScan(eventId) {
     show('idle', 'Checking ' + code + '…', 'One moment');
     try {
       const r = await api('/api/organizer/checkin', { method: 'POST', body: { code, eventId: ev.id } });
-      checkedIn++; document.getElementById('scIn').textContent = checkedIn;
+      markIn('t:' + code);
       show('ok', 'Admit ' + r.ticket.buyerName, r.ticket.tierName + ' · ' + code);
       addLog('ok', code, r.ticket.buyerName + ' — ' + r.ticket.tierName);
       scanFeedback('ok', soundOn);
@@ -3503,6 +3621,7 @@ async function pageScan(eventId) {
       const sub = offline ? 'This ticket was NOT checked in. Check your signal and scan again.' : e.message;
       show(offline ? 'bad' : kind, title, sub);
       addLog(offline ? 'bad' : kind, code, title);
+      if (kind === 'warn' && !offline) markIn('t:' + code);
       scanFeedback('bad', soundOn);
     } finally { busy = false; }
   };

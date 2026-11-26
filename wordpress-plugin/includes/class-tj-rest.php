@@ -122,6 +122,10 @@ class TJ_Rest {
     self::route('GET', '/organizer/events/:id', 'r_org_event');
     self::route('GET', '/organizer/events/:id/attendees', 'r_attendees');
     self::route('POST', '/organizer/checkin', 'r_checkin');
+    self::route('GET', '/organizer/events/:id/guests', 'r_guests');
+    self::route('POST', '/organizer/events/:id/guests', 'r_guest_add');
+    self::route('DELETE', '/organizer/events/:id/guests/:gid', 'r_guest_delete');
+    self::route('POST', '/organizer/events/:id/guests/:gid/checkin', 'r_guest_checkin');
     self::route('GET', '/organizer/reports', 'r_org_reports');
     self::route('GET', '/organizer/reports/export', 'r_org_export');
     self::route('POST', '/upload', 'r_upload');
@@ -1000,6 +1004,7 @@ class TJ_Rest {
       return array('ok' => true, 'cancelled' => true, 'message' => 'Event has ticket sales, so it was cancelled instead of deleted.');
     }
     TJ_Store::delete_event($ev['id']);
+    delete_option('tj_guests_' . $ev['id']);
     TJ_Notify::event_deleted($ev, $user);
     return array('ok' => true, 'deleted' => true);
   }
@@ -1349,6 +1354,66 @@ class TJ_Rest {
       }
     }
     self::fail(404, 'No ticket ' . $code . ' for this event');
+  }
+
+  // ---------- guest list (names the organizer types in, checked in by tapping at the door) ----------
+  private static function guests_load($event_id) {
+    $g = get_option('tj_guests_' . $event_id, array());
+    return is_array($g) ? array_values($g) : array();
+  }
+  private static function guests_save($event_id, $list) {
+    update_option('tj_guests_' . $event_id, array_values($list), false);
+  }
+  private static function guest_out($g) {
+    return array('id' => (string) $g['id'], 'name' => (string) $g['name'], 'email' => (string) self::g($g, 'email', ''), 'note' => (string) self::g($g, 'note', ''), 'plus' => (int) self::g($g, 'plus', 0), 'addedAt' => (string) self::g($g, 'addedAt', ''), 'addedBy' => (string) self::g($g, 'addedBy', ''), 'checkedIn' => !empty($g['checkedIn']), 'checkedInAt' => self::g($g, 'checkedInAt') ? $g['checkedInAt'] : null);
+  }
+  public static function r_guests($c) {
+    $user = self::require_organizer();
+    $ev = self::owned_event($user, $c['params']['id']);
+    return array('guests' => array_map(array(__CLASS__, 'guest_out'), self::guests_load($ev['id'])));
+  }
+  public static function r_guest_add($c) {
+    $user = self::require_organizer();
+    $ev = self::owned_event($user, $c['params']['id']);
+    $b = $c['body'];
+    $name = self::str(self::g($b, 'name'), 'Name', 80, true);
+    $email = strtolower(self::str(self::g($b, 'email'), 'Email', 160));
+    if ($email !== '' && (!self::valid_email($email) || !is_email($email))) self::fail(400, 'Enter a valid email address (or leave it empty)');
+    $note = self::str(self::g($b, 'note'), 'Note', 120);
+    $plus = (int) round(is_numeric(self::g($b, 'plus')) ? (float) $b['plus'] : 0);
+    if ($plus < 0 || $plus > 20) self::fail(400, 'Extra guests must be between 0 and 20');
+    $list = self::guests_load($ev['id']);
+    if (count($list) >= 2000) self::fail(400, 'The guest list is full (2,000 names)');
+    $g = array('id' => 'gst_' . self::rand_hex(8), 'name' => $name, 'email' => $email, 'note' => $note, 'plus' => $plus, 'addedAt' => TJ_Store::now_iso(), 'addedBy' => (string) $user['name'], 'checkedIn' => false, 'checkedInAt' => null);
+    $list[] = $g;
+    self::guests_save($ev['id'], $list);
+    return array('guest' => self::guest_out($g));
+  }
+  private static function guest_index($list, $gid) {
+    foreach ($list as $i => $g) if ($g['id'] === $gid) return $i;
+    self::fail(404, 'That name is not on the guest list');
+  }
+  public static function r_guest_delete($c) {
+    $user = self::require_organizer();
+    $ev = self::owned_event($user, $c['params']['id']);
+    $list = self::guests_load($ev['id']);
+    $i = self::guest_index($list, (string) $c['params']['gid']);
+    array_splice($list, $i, 1);
+    self::guests_save($ev['id'], $list);
+    return array('ok' => true);
+  }
+  public static function r_guest_checkin($c) {
+    $user = self::require_organizer();
+    $ev = self::owned_event($user, $c['params']['id']);
+    $list = self::guests_load($ev['id']);
+    $i = self::guest_index($list, (string) $c['params']['gid']);
+    if (self::g($c['body'], 'undo')) { $list[$i]['checkedIn'] = false; $list[$i]['checkedInAt'] = null; }
+    else {
+      if (!empty($list[$i]['checkedIn'])) self::fail(409, $list[$i]['name'] . ' was already checked in');
+      $list[$i]['checkedIn'] = true; $list[$i]['checkedInAt'] = TJ_Store::now_iso();
+    }
+    self::guests_save($ev['id'], $list);
+    return array('guest' => self::guest_out($list[$i]));
   }
 
   public static function r_upload($c) {
