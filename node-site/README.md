@@ -28,6 +28,17 @@ The owner account controls the Admin Panel and can also post events ("My Events"
 
 **Countdowns:** every event card shows a large "⏳ Goes live in" countdown with Days / Hours / Minutes / Seconds boxes counting down to the event's start time, the event page has a large "This event goes live in" Days / Hours / Minutes / Seconds countdown, and the calendar pop-up shows one too. When the event starts it switches to "Live now" ("🔴 This event is LIVE now!" on the event page), then "Ended".
 
+**Demo event flyers:** ready-made 16:9 flyers (generated with GPT Image 2) for Friday Night Afrobeats Takeover, Island Vibes Summer Fest, Startup Pitch Night, Laugh Out Loud Comedy Night, Taste of the Islands Food Festival and Junkanoo Rush Experience.
+- **Files:** `public/flyers/*.jpg` (1600 px), plus a `-share.jpg` copy under 300 KB for WhatsApp previews. The WordPress copies are in `assets/seed/flyers`.
+- **Attaching:** each is added once to the event with that exact title, and only if the event has no picture. A flyer the organizer uploads is never replaced. Node records this in `settings.bundledFlyers`; WordPress uploads them to the Media Library and records it in the option `tj_bundled_flyers`.
+- **Event pages:** now show the whole flyer (16:9, no cropping).
+
+**Where people land after logging in/out:**
+- Admins go to the Admin Panel, organizers to the Organizer Dashboard, and attendees to My Ticket Dashboard.
+- A purchase in progress (checkout, cart, order or ticket link) still returns to where the person was.
+- Logging out always goes to the home page.
+- On WordPress, attendees and organizers using wp-login.php also go to their dashboard. WordPress staff still go to wp-admin, and wp-login log-outs go home.
+
 **Shopping cart:**
 - **Header:** a 🛒 button with a count. On WordPress it is added to the TicketJunkies header and opens the Checkout page at `#/cart`.
 - **Event pages:** besides "Continue to checkout" (buy now), there is **Add to cart** / **Update cart**.

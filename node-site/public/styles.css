@@ -1174,3 +1174,7 @@ html:has(#tjPre) .loading { color: transparent; }
 .cart-done { display: grid; gap: 10px; margin-top: 10px; }
 .cart-done-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
 @media (max-width: 640px) { .cart-thumb { width: 84px; } .cart-line { grid-template-columns: 1fr auto; } .cart-amt { grid-column: 1 / -1; text-align: left; } .cart-ev-head .btn { padding: 6px 8px; } }
+
+/* event page: show the whole flyer (no cropping) when the event has a picture */
+.cover.big.has-img { aspect-ratio: 16 / 9; background: #0d1017; }
+.cover.big.has-img .cover-img { object-fit: contain; }

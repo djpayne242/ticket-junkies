@@ -383,6 +383,44 @@ class TJ_Store {
 
   // ---------- owner's events shipped with the plugin (assets/seed/events.json) ----------
   // Each bundled event is added once if it is missing. If you delete it later it stays deleted.
+  /** Ready-made flyers for the demo events (assets/seed/flyers). Added once per event, only when it has no picture yet. */
+  public static $BUNDLED_FLYERS = array(
+    'Friday Night Afrobeats Takeover' => 'friday-night-afrobeats-takeover',
+    'Island Vibes Summer Fest' => 'island-vibes-summer-fest',
+    'Startup Pitch Night' => 'startup-pitch-night',
+    'Laugh Out Loud Comedy Night' => 'laugh-out-loud-comedy-night',
+    'Taste of the Islands Food Festival' => 'taste-of-the-islands-food-festival',
+    'Junkanoo Rush Experience' => 'junkanoo-rush-experience',
+  );
+  public static function apply_bundled_flyers() {
+    if (!class_exists('TJ_Rest')) return;
+    $done = get_option('tj_bundled_flyers');
+    if (!is_array($done)) $done = array();
+    $todo = array();
+    foreach (self::events() as $e) {
+      $t = trim((string) $e['title']);
+      if (!isset(self::$BUNDLED_FLYERS[$t]) || !empty($e['imageUrl']) || !empty($done[$e['id']])) continue;
+      $todo[] = $e;
+    }
+    if (!$todo || get_transient('tj_applying_flyers')) return;
+    set_transient('tj_applying_flyers', 1, 120);
+    foreach ($todo as $e) {
+      $slug = self::$BUNDLED_FLYERS[trim((string) $e['title'])];
+      $src = TJ_DIR . 'assets/seed/flyers/' . $slug . '.jpg';
+      $share = TJ_DIR . 'assets/seed/flyers/' . $slug . '-share.jpg';
+      $done[$e['id']] = $slug;
+      if (!file_exists($src)) continue;
+      $url = TJ_Rest::save_upload($slug . '.jpg', file_get_contents($src), $e['title']);
+      if (!$url) continue;
+      $e['imageUrl'] = $url;
+      $e['imageShareUrl'] = file_exists($share) ? TJ_Rest::save_upload($slug . '-share.jpg', file_get_contents($share), $e['title'] . ' (share)') : '';
+      self::save_event($e);
+    }
+    update_option('tj_bundled_flyers', $done, false);
+    self::flush_cache();
+    delete_transient('tj_applying_flyers');
+  }
+
   public static function restore_bundled_events() {
     $file = TJ_DIR . 'assets/seed/events.json';
     if (!file_exists($file)) return;

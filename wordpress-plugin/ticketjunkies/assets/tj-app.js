@@ -436,7 +436,8 @@ function renderNav() {
   }
   $nav.innerHTML = html;
   const lo = document.getElementById('logoutBtn');
-  if (lo) lo.onclick = async () => { await api('/api/auth/logout', { method: 'POST' }); me = null; toast('Logged out'); go('#/'); renderNav(); };
+  // Everyone (admin, organizer, attendee) goes to the home page after logging out
+  if (lo) lo.onclick = async () => { try { await api('/api/auth/logout', { method: 'POST' }); } catch {} me = null; toast('Logged out'); renderNav(); go('#/'); };
 }
 document.addEventListener('click', (e) => { if (e.target.closest('#menuBtn')) $nav.classList.toggle('open'); });
 
@@ -1263,7 +1264,9 @@ function pageLogin(params) {
     try {
       const { user } = await api('/api/auth/login', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
       me = user; toast(`Welcome back, ${user.name.split(' ')[0]}!`);
-      go(next || homeFor(user));
+      // Admins → Admin Panel, organizers → Organizer Dashboard, attendees → My Ticket Dashboard.
+      // Only a purchase in progress (checkout, cart, an order or ticket link) returns to where the person was.
+      go(next && /^#\/(checkout|cart|order|t)\//.test(next + '/') ? next : homeFor(user));
     } catch (err) { showErr('loginErr', err.message); }
   };
 }

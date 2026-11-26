@@ -79,7 +79,30 @@ function loadDb() {
     seed();
   }
   migrate();
+  applyBundledFlyers();
   saveDb();
+}
+
+// Ready-made flyers for the demo events (public/flyers). Added once per event, only when it has no picture yet,
+// so a flyer the organizer uploads is never replaced.
+const BUNDLED_FLYERS = {
+  'Friday Night Afrobeats Takeover': 'friday-night-afrobeats-takeover',
+  'Island Vibes Summer Fest': 'island-vibes-summer-fest',
+  'Startup Pitch Night': 'startup-pitch-night',
+  'Laugh Out Loud Comedy Night': 'laugh-out-loud-comedy-night',
+  'Taste of the Islands Food Festival': 'taste-of-the-islands-food-festival',
+  'Junkanoo Rush Experience': 'junkanoo-rush-experience',
+};
+function applyBundledFlyers() {
+  db.settings.bundledFlyers ||= {};
+  for (const e of db.events) {
+    const slug = BUNDLED_FLYERS[String(e.title || '').trim()];
+    if (!slug || e.imageUrl || db.settings.bundledFlyers[e.id]) continue;
+    if (!fs.existsSync(path.join(PUBLIC, 'flyers', slug + '.jpg'))) continue;
+    e.imageUrl = `/flyers/${slug}.jpg`;
+    e.imageShareUrl = `/flyers/${slug}-share.jpg`;
+    db.settings.bundledFlyers[e.id] = slug;
+  }
 }
 
 // Upgrades older databases and guarantees an administrator account exists.

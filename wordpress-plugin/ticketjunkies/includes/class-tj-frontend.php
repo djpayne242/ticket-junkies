@@ -56,6 +56,15 @@ final class TJ_Frontend {
     });
     add_action('wp_body_open', [__CLASS__, 'preloader'], 1);
     add_action('wp_footer', [__CLASS__, 'preloader_fallback'], 1);
+    // Logging out anywhere (including wp-login.php) lands on the home page
+    add_filter('logout_redirect', function ($to, $requested, $user) { return home_url('/'); }, 20, 3);
+    // Attendees and organizers who log in through wp-login.php go to their TicketJunkies dashboard
+    // (WordPress staff who can edit posts keep going to wp-admin so they can manage the site)
+    add_filter('login_redirect', function ($to, $requested, $user) {
+      if (!$user || is_wp_error($user) || user_can($user, 'edit_posts')) return $to;
+      if ($requested && strpos($requested, admin_url()) !== 0) return $to;
+      return in_array('tj_organizer', (array) $user->roles, true) ? tj_route_url('#/dashboard') : tj_route_url('#/tickets');
+    }, 20, 3);
     $ui = self::ui();
     if ($ui['header'] || $ui['footer']) add_filter('hello_elementor_header_footer', '__return_false');
     if ($ui['header']) add_action('wp_body_open', [__CLASS__, 'header'], 5);

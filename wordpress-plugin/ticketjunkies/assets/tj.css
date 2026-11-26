@@ -1176,6 +1176,10 @@ html:has(#tjPre) .tj-root .loading { color: transparent; }
 .tj-root .cart-done-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
 @media (max-width: 640px) { .tj-root .cart-thumb { width: 84px; } .tj-root .cart-line { grid-template-columns: 1fr auto; } .tj-root .cart-amt { grid-column: 1 / -1; text-align: left; } .tj-root .cart-ev-head .btn { padding: 6px 8px; } }
 
+/* event page: show the whole flyer (no cropping) when the event has a picture */
+.tj-root .cover.big.has-img { aspect-ratio: 16 / 9; background: #0d1017; }
+.tj-root .cover.big.has-img .cover-img { object-fit: contain; }
+
 
 /* =========================================================
    WordPress / Elementor integration
