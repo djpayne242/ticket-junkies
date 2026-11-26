@@ -687,7 +687,7 @@ class TJ_Rest {
     $m = $s['maps'];
     return array(
       'categories' => TJ_Store::$CATEGORIES, 'feePercent' => $s['feePercent'], 'feeFixed' => $s['feeFixed'],
-      'maps' => array('googleMapsKey' => $m['googleMapsKey'], 'center' => array('lat' => $m['weatherLat'], 'lng' => $m['weatherLng'])),
+      'maps' => array('googleMapsKey' => $m['googleMapsKey'], 'center' => array('lat' => $m['weatherLat'], 'lng' => $m['weatherLng']), 'country' => (string) self::g($m, 'country', '')),
       'captcha' => self::captcha_public(),
       'preloader' => $s['preloader'],
       'security' => array('idleMinutes' => (int) $s['security']['idleMinutes'], 'allowReset' => (bool) $s['security']['allowReset'], 'minPassword' => (int) $s['security']['minPassword']),
@@ -891,6 +891,8 @@ class TJ_Rest {
       $out[] = array(
         'id' => $e['id'], 'title' => $e['title'], 'startsAt' => $e['startsAt'], 'endsAt' => $e['endsAt'],
         'venue' => (string) self::g($e, 'venue'), 'category' => (string) self::g($e, 'category'), 'sessionLabel' => (string) self::g($e, 'sessionLabel'),
+        'city' => (string) self::g($e, 'city', ''), 'address' => (string) self::g($e, 'address', ''),
+        'lat' => is_numeric(self::g($e, 'lat')) ? (float) $e['lat'] : null, 'lng' => is_numeric(self::g($e, 'lng')) ? (float) $e['lng'] : null,
         'time' => wp_date('g:i A', (int) floor(TJ_Store::ts_ms($e['startsAt']) / 1000)), 'endTime' => wp_date('g:i A', (int) floor(TJ_Store::ts_ms($e['endsAt']) / 1000)),
         'startDay' => $start, 'days' => $days, 'ended' => TJ_Store::ts_ms($e['endsAt']) < $now,
       );

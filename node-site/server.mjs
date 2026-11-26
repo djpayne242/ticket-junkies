@@ -904,7 +904,7 @@ route('GET', '/api/meta', () => {
   const m = db.settings.maps;
   return {
     categories: CATEGORIES, feePercent: db.settings.feePercent, feeFixed: db.settings.feeFixed,
-    maps: { googleMapsKey: m.googleMapsKey, center: { lat: m.weatherLat, lng: m.weatherLng } },
+    maps: { googleMapsKey: m.googleMapsKey, center: { lat: m.weatherLat, lng: m.weatherLng }, country: m.country || '' },
     captcha: captchaPublic(),
     preloader: db.settings.preloader,
     security: { idleMinutes: SEC().idleMinutes, allowReset: SEC().allowReset, minPassword: SEC().minPassword },
@@ -1091,7 +1091,7 @@ route('GET', '/api/calendar', async ({ req, query }) => {
     if (!days.length) continue;
     const pe = publicEvent(e, viewer);
     const lp = lowestPrice(e.tiers);
-    events.push({ id: e.id, title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, venue: e.venue || '', city: e.city || '', category: e.category, sessionLabel: e.sessionLabel || '',
+    events.push({ id: e.id, title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, venue: e.venue || '', city: e.city || '', address: e.address || '', lat: Number.isFinite(e.lat) ? e.lat : null, lng: Number.isFinite(e.lng) ? e.lng : null, category: e.category, sessionLabel: e.sessionLabel || '',
       time: siteTimeFmt.format(new Date(e.startsAt)), endTime: siteTimeFmt.format(new Date(e.endsAt)), startDay: all[0], days, ended: new Date(e.endsAt).getTime() < now,
       imageUrl: e.imageUrl || '', summary: shortText(e.description), organizer: pe.organizer,
       ...lp });

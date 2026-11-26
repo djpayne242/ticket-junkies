@@ -34,35 +34,45 @@ const TJ_WIDGETS = {
   async map(el, o) {
     const query = o.category ? { q: '', category: o.category } : tjHomeQuery();
     const filtered = searchActive(searchValues(query));
-    el.innerHTML = `<section class="map-section">
+    el.innerHTML = `<div class="area-host"></div><section class="map-section">
       ${o.showTitle === false ? '' : `<div class="section-head"><h2>${esc(filtered ? (o.titleFiltered || '🗺️ These events on the map') : (o.title || '🗺️ Live events on the map'))}</h2><span class="muted small tj-map-count">Tap a pin to see the event</span></div>`}
       <div class="events-map" style="${o.height ? `height:${Number(o.height)}px` : ''}"><div class="loading">Loading map…</div></div></section>`;
     const mapEl = el.querySelector('.events-map');
     try {
-      const events = await tjEvents(query);
+      const sv = searchValues(query);
+      const [all, area] = await Promise.all([tjEvents(query), TJArea.current()]);
+      const { events, searched } = await TJArea.filter(all, sv);
+      TJArea.fillBar({ ...area, searched });
+      const where = area.place && area.scope !== 'all' && !searched ? ' in ' + TJArea.label(area.scope, area.place) : '';
       const pinned = events.filter((e) => Number.isFinite(e.lat));
       const c = el.querySelector('.tj-map-count');
-      if (c) c.textContent = pinned.length ? `${pinned.length} event${pinned.length === 1 ? '' : 's'} · tap a pin to see the event` : 'No mapped events yet';
-      await TJGeo.eventsMap(mapEl, events, { googleKey: META.maps?.googleMapsKey, center: META.maps?.center || { lat: 25.0582, lng: -77.3431 } });
+      if (c) c.textContent = pinned.length ? `${pinned.length} event${pinned.length === 1 ? '' : 's'}${where} · tap a pin to see the event` : `No mapped events${where} yet`;
+      await TJGeo.eventsMap(mapEl, events, { googleKey: META.maps?.googleMapsKey, center: await TJArea.center() });
     } catch { mapEl.innerHTML = '<div class="empty" style="box-shadow:none">Map could not be loaded right now.</div>'; }
   },
   async grid(el, o) {
     const query = o.category ? { q: '', category: o.category } : tjHomeQuery();
     const filtered = !o.category && searchActive(searchValues(query));
-    el.innerHTML = `${o.showTitle === false ? '' : `<div class="section-head"><h2>${esc(filtered ? (o.titleFiltered || 'Search results') : (o.title || 'Upcoming events'))}</h2>${o.showCount === false ? '' : '<span class="muted small tj-count"></span>'}</div>`}
+    el.innerHTML = `<div class="area-host"></div>${o.showTitle === false ? '' : `<div class="section-head"><h2>${esc(filtered ? (o.titleFiltered || 'Search results') : (o.title || 'Upcoming events'))}</h2>${o.showCount === false ? '' : '<span class="muted small tj-count"></span>'}</div>`}
       <div class="grid"${o.columns ? ` style="grid-template-columns:repeat(${Number(o.columns)},minmax(0,1fr))"` : ''}><div class="loading">Loading events…</div></div>`;
     try {
-      let events = await tjEvents(query);
+      const sv = searchValues(query);
+      const [all, area] = await Promise.all([tjEvents(query), TJArea.current()]);
+      let { events, searched } = await TJArea.filter(all, sv);
+      TJArea.fillBar({ ...area, searched });
+      const where = area.place && area.scope !== 'all' && !searched ? ' in ' + TJArea.label(area.scope, area.place) : '';
       if (o.limit) events = events.slice(0, Number(o.limit));
-      const c = el.querySelector('.tj-count'); if (c) c.textContent = `${events.length} event${events.length === 1 ? '' : 's'}`;
+      const c = el.querySelector('.tj-count'); if (c) c.textContent = `${events.length} event${events.length === 1 ? '' : 's'}${where}`;
       el.querySelector('.grid').innerHTML = events.length ? events.map(card).join('')
+        : all.length && where ? TJArea.emptyHtml(area)
         : `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div><h3>${esc(o.emptyTitle || 'No events found')}</h3><p class="muted">${esc(o.emptyText || 'Try another search or category.')}</p></div>`;
     } catch (e) { el.querySelector('.grid').innerHTML = `<div class="error">${esc(e.message)}</div>`; }
   },
   weather(el, o) {
     el.innerHTML = infoBarHtml(o);
-    const place = o.place && o.lat && o.lng ? { name: o.place, lat: Number(o.lat), lng: Number(o.lng) } : META.weatherPlace;
-    if (o.showWeather !== false && place) TJGeo.homeWeather(el.querySelector('#homeWx'), place);
+    // A fixed place set in the widget wins; otherwise the weather follows the visitor's location
+    const fixed = o.place && o.lat && o.lng ? { name: o.place, lat: Number(o.lat), lng: Number(o.lng) } : null;
+    if (o.showWeather !== false) (fixed ? Promise.resolve(fixed) : TJArea.weatherPlace()).then((pl) => { const w = el.querySelector('#homeWx'); if (pl && w) TJGeo.homeWeather(w, pl); });
     if (o.showClock !== false) startHomeClock();
   },
   // Slim clock & weather bar above the orange & blue "Get your ticket fix." box (search inside)
@@ -79,8 +89,7 @@ const TJ_WIDGETS = {
       ${cta ? `<div class="hero-cta">${cta}</div>` : ''}
     </section>`;
     wireSearchForm(el.querySelector('form.search-adv'), sv, tjGoSearch);
-    const place = META.weatherPlace;
-    if (o.showWeather !== false && place) TJGeo.homeWeather(el.querySelector('#homeWx'), place);
+    if (o.showWeather !== false) TJArea.weatherPlace().then((pl) => { const w = el.querySelector('#homeWx'); if (pl && w) TJGeo.homeWeather(w, pl); });
     if (o.showClock !== false) startHomeClock();
   },
   // Month calendar with event days highlighted
@@ -124,6 +133,18 @@ function tjAutoCalendar(root) {
   cal.setAttribute('data-tj-widget', 'calendar');
   cal.setAttribute('data-tj-opts', '{}');
   map.parentNode.insertBefore(cal, map.nextSibling);
+}
+
+// The visitor picked another area (or shared their exact location): redraw the weather, map, events and calendar
+function tjAreaChanged() {
+  document.querySelectorAll('[data-tj-widget]').forEach((el) => {
+    const t = el.dataset.tjWidget;
+    if (!el.dataset.tjMounted) return;
+    if (t === 'map' || t === 'grid' || t === 'calendar') { try { const r = TJ_WIDGETS[t](el, tjOpts(el)); if (r && r.catch) r.catch(() => {}); } catch {} }
+  });
+  const w = document.getElementById('homeWx');
+  if (w) TJArea.weatherPlace().then((pl) => { if (pl) TJGeo.homeWeather(w, pl); });
+  if (TJ_SCREEN && TJ_SCREEN.key === 'home' && !parseHash().parts[0]) route();
 }
 
 function tjMountAll(root) {

@@ -317,6 +317,14 @@ In **Create Event → Date & time** there are two dropdowns:
   - **Location:** "Choose a saved venue" fills in the main venue, address, city and map pin. **More venues** adds extra places for events held at more than one venue (up to 10 in total). Pick a saved venue or type one in; a saved venue's address fills in by itself.
   - **Event page:** lists every venue with its own Directions link. Event cards show "+N venues".
 
+## 📍 Events, map and weather near the visitor + secure checkout (v1.3.7)
+- **Location is detected automatically** (no pop-up) from the visitor's internet connection. It's checked against the device's time zone, because Bahamian internet providers often appear to be in Miami: when the two disagree, the time zone wins (e.g. a phone set to Nassau time is placed in Nassau). Visitors who already allowed location, or who tap **🎯 Use my exact location**, are placed exactly using GPS. The result is saved on that device only (12 hours for the automatic guess, 7 days for GPS).
+- **Home page weather** shows the visitor's own town instead of a fixed place. A Weather widget with its own fixed place on WordPress keeps that place.
+- **The map, the events list and the calendar only show events in the visitor's area.** A bar above the map says *📍 Showing events in Nassau* with buttons for the **city**, the **island / state**, the **country** and **Everywhere**. By default the smallest area that has events is picked. When an area has none, visitors see "No upcoming events in … yet" with a **Show events everywhere** button. Typed searches (words, venue, organizer) still search everywhere.
+- Matching uses each event's map pin (within about 40 km for a city, 160 km for an island/state) plus the city and address text. Events count as being in the site's own country (*Admin → Settings → Maps*, e.g. Bahamas).
+- **Checkout: secure payment section**, centered at the bottom of the checkout and cart-checkout pages. A green *Secure payment* badge, then *Secure checkout* (encrypted SSL connection), *Card details protected* (we never store your full card number), *Fraud protection* (only when the robot check is on for checkout) and *Guaranteed tickets*, then the **Visa, Mastercard and American Express** logos with "We accept Visa, Mastercard and American Express".
+- Services used by the visitor's browser: ipwho.is (with ipapi.co as backup) for the automatic guess, and OpenStreetMap Nominatim to name a GPS position.
+
 ## ✅ Green confirmation pop-ups (v1.3.6)
 - The confirmation message that pops up at the bottom of the screen after a change ("Saved", "Dark mode", "Added to the guest list"…) is now TicketJunkies green (#84d65f) with dark text, in both light and dark mode. Error messages are still red.
 

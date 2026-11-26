@@ -572,6 +572,174 @@ function wireSearchForm(form, v, onGo) {
 function norm(x) { return String(x || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 function todayLocalIso() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 
+// ---------- visitor's area: weather, map, events and calendar follow where the visitor is ----------
+// Detected automatically from the visitor's internet connection (no pop-up), or exactly from the device's GPS when
+// location is already allowed or the visitor taps "Use my exact location". Saved on this device only.
+const TJArea = (() => {
+  const KEY = 'tj_area2';
+  const SCOPES = ['city', 'region', 'country', 'all'];
+  const RADIUS = { city: 40, region: 160 }; // km
+  const n = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/^the\s+/, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch {} };
+  const fresh = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && Date.now() - (p.at || 0) < (p.source === 'ip' ? 12 : 7 * 24) * 3600e3;
+  const getJson = (url, ms) => {
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const t = ctl ? setTimeout(() => ctl.abort(), ms) : 0;
+    return fetch(url, { credentials: 'omit', signal: ctl ? ctl.signal : undefined }).then((r) => (r.ok ? r.json() : Promise.reject(new Error('lookup failed')))).finally(() => clearTimeout(t));
+  };
+  async function byIp() {
+    try { const d = await getJson('https://ipwho.is/?fields=success,city,region,country,latitude,longitude,timezone', 4000); if (d && d.success !== false && Number.isFinite(d.latitude)) return { city: d.city || '', region: d.region || '', country: d.country || '', lat: d.latitude, lng: d.longitude, tz: (d.timezone && d.timezone.id) || '', source: 'ip' }; } catch {}
+    try { const d = await getJson('https://ipapi.co/json/', 4000); if (d && Number.isFinite(d.latitude)) return { city: d.city || '', region: d.region || '', country: d.country_name || '', lat: d.latitude, lng: d.longitude, tz: d.timezone || '', source: 'ip' }; } catch {}
+    return null;
+  }
+  // Many Caribbean internet providers route through Miami, so an internet-based guess can land in the wrong country.
+  // The device's own time zone is a reliable second opinion: when they disagree, the time zone wins.
+  const TZ_COUNTRY = {
+    'America/Nassau': 'Bahamas', 'America/Jamaica': 'Jamaica', 'America/Port_of_Spain': 'Trinidad and Tobago', 'America/Barbados': 'Barbados',
+    'America/Puerto_Rico': 'Puerto Rico', 'America/Santo_Domingo': 'Dominican Republic', 'America/Port-au-Prince': 'Haiti', 'America/Havana': 'Cuba',
+    'America/Cayman': 'Cayman Islands', 'America/Grand_Turk': 'Turks and Caicos Islands', 'Atlantic/Bermuda': 'Bermuda', 'America/Belize': 'Belize',
+    'America/Antigua': 'Antigua and Barbuda', 'America/St_Lucia': 'Saint Lucia', 'America/Grenada': 'Grenada', 'America/St_Vincent': 'Saint Vincent and the Grenadines',
+    'America/Dominica': 'Dominica', 'America/St_Kitts': 'Saint Kitts and Nevis', 'America/Curacao': 'Curacao', 'America/Aruba': 'Aruba', 'America/Guyana': 'Guyana',
+    'America/Tortola': 'British Virgin Islands', 'America/St_Thomas': 'U.S. Virgin Islands', 'America/Anguilla': 'Anguilla', 'America/Montserrat': 'Montserrat',
+    'America/Toronto': 'Canada', 'America/Vancouver': 'Canada', 'Europe/London': 'United Kingdom', 'America/Mexico_City': 'Mexico', 'America/Panama': 'Panama', 'America/Costa_Rica': 'Costa Rica',
+  };
+  async function search(q) {
+    try {
+      const list = await getJson(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&accept-language=en&q=${encodeURIComponent(q)}`, 6000);
+      const h = list && list[0]; if (!h) return null;
+      const a = h.address || {};
+      return { city: a.city || a.town || a.village || a.municipality || h.name || '', region: a.island || a.state || a.region || a.county || '', country: a.country || '', lat: Number(h.lat), lng: Number(h.lon) };
+    } catch { return null; }
+  }
+  async function byNetwork() {
+    const ip = await byIp();
+    let tz = ''; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch {}
+    if (!tz || !tz.includes('/') || /^Etc\//.test(tz) || (ip && (!ip.tz || ip.tz === tz))) return ip;
+    const country = TZ_COUNTRY[tz];
+    if (ip && country && n(ip.country) === n(country)) return ip; // same country, just a nearby zone
+    if (ip && !country) return ip; // unknown zone: keep the internet-based guess
+    const city = tz.split('/').pop().replace(/_/g, ' ');
+    const hit = await search(country ? city + ', ' + country : city);
+    if (hit && Number.isFinite(hit.lat)) return { ...hit, country: hit.country || country || '', source: 'tz' };
+    // Lookup failed: use the site's home town when the visitor is in the site's country, otherwise just the country
+    const home = typeof META !== 'undefined' && META.weatherPlace && META.maps && META.maps.country ? META : null;
+    if (home && n(home.maps.country) === n(country) && Number.isFinite(home.weatherPlace.lat)) {
+      return { city: String(home.weatherPlace.name || '').split(',')[0].trim(), region: '', country: home.maps.country, lat: home.weatherPlace.lat, lng: home.weatherPlace.lng, source: 'tz' };
+    }
+    return { city: '', region: '', country, lat: null, lng: null, source: 'tz' }; // not saved: tried again next visit
+  }
+  async function reverse(lat, lng) {
+    try {
+      const d = await getJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&addressdetails=1&accept-language=en&lat=${lat}&lon=${lng}`, 8000);
+      const a = (d && d.address) || {};
+      return { city: a.city || a.town || a.village || a.municipality || a.suburb || '', region: a.island || a.state || a.region || a.state_district || a.county || '', country: a.country || '' };
+    } catch { return { city: '', region: '', country: '' }; }
+  }
+  const gpsCoords = () => new Promise((res, rej) => {
+    if (!navigator.geolocation) { rej(new Error('Location is not available in this browser.')); return; }
+    navigator.geolocation.getCurrentPosition((p) => res(p.coords), (e) => rej(new Error(e && e.code === 1 ? 'Location is blocked. Allow location for this site in your browser settings and try again.' : 'Could not get your location right now. Please try again.')), { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
+  });
+  async function byGps() { const c = await gpsCoords(); return { ...(await reverse(c.latitude, c.longitude)), lat: c.latitude, lng: c.longitude, source: 'gps' }; }
+  async function granted() { try { return !!(navigator.permissions && (await navigator.permissions.query({ name: 'geolocation' })).state === 'granted'); } catch { return false; } }
+  let placeP = null;
+  function place() {
+    if (placeP) return placeP;
+    const find = (async () => {
+      if (fresh(saved.place)) return saved.place;
+      let p = null;
+      if (await granted()) { try { p = await byGps(); } catch {} }
+      if (!p) p = await byNetwork();
+      if (p) { p.at = Date.now(); saved.place = p; save(); return p; }
+      return saved.place && Number.isFinite(saved.place.lat) ? saved.place : null;
+    })().catch(() => null);
+    placeP = Promise.race([find, new Promise((r) => setTimeout(() => r(saved.place && Number.isFinite(saved.place.lat) ? saved.place : null), 6000))]);
+    return placeP;
+  }
+  const km = (a, b) => { const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r; const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2; return 12742 * Math.asin(Math.sqrt(x)); };
+  const avail = (s, p) => s === 'all' || (s === 'city' && (p.city || Number.isFinite(p.lat))) || (s === 'region' && p.region && n(p.region) !== n(p.city)) || (s === 'country' && !!p.country);
+  function label(s, p) {
+    if (!p || s === 'all') return 'Everywhere';
+    return (s === 'city' ? p.city || 'Near me' : s === 'region' ? p.region : p.country) || 'Near me';
+  }
+  // Is this event in the visitor's city / island-state / country?
+  function match(e, s, p) {
+    if (!p || s === 'all' || !e) return true;
+    const txt = ' ' + n([e.city, e.address, e.venue].join(' ')) + ' ';
+    const has = (x) => { const k = n(x); return k.length > 1 && txt.includes(' ' + k + ' '); };
+    const d = Number.isFinite(e.lat) && Number.isFinite(e.lng) && Number.isFinite(p.lat) && Number.isFinite(p.lng) ? km(p, e) : null;
+    if (s === 'city') return (d !== null && d <= RADIUS.city) || has(p.city);
+    if (s === 'region') return (d !== null && d <= RADIUS.region) || has(p.region) || has(p.city);
+    if (s === 'country') {
+      if (has(p.country)) return true;
+      const site = n(typeof META !== 'undefined' && META && META.maps && META.maps.country);
+      return !!site && site === n(p.country); // events are placed in the site's own country
+    }
+    return true;
+  }
+  let allP = null;
+  const upcoming = () => (allP ||= api('/api/events').then((r) => r.events || []).catch(() => []));
+  // Which area to show: the visitor's choice, otherwise the smallest area (city → island/state → country) that has events
+  async function current() {
+    const p = await place();
+    if (!p) return { place: null, scope: 'all' };
+    if (saved.scope && SCOPES.includes(saved.scope) && avail(saved.scope, p)) return { place: p, scope: saved.scope };
+    const evs = await upcoming();
+    for (const s of ['city', 'region', 'country']) if (avail(s, p) && evs.some((e) => match(e, s, p))) return { place: p, scope: s, auto: true };
+    return { place: p, scope: avail('country', p) ? 'country' : 'city', auto: true };
+  }
+  // A typed search for a venue, organizer or words looks everywhere
+  async function filter(events, sv) {
+    const a = await current();
+    if (sv && (sv.q || sv.venue || sv.organizer)) return { ...a, events, searched: true };
+    return { ...a, events: events.filter((e) => match(e, a.scope, a.place)) };
+  }
+  function barHtml(a) {
+    if (!a || !a.place) return '';
+    const p = a.place;
+    const chips = SCOPES.filter((s) => avail(s, p)).map((s) => `<button type="button" class="area-chip${s === a.scope ? ' on' : ''}" data-area-scope="${s}" aria-pressed="${s === a.scope}">${esc(label(s, p))}</button>`).join('');
+    const now = a.searched ? 'Search results from everywhere' : a.scope === 'all' ? 'Showing events everywhere' : `Showing events in <b>${esc(label(a.scope, p))}</b>`;
+    return `<div class="area-bar"><div class="area-now"><span class="area-pin" aria-hidden="true">📍</span><span>${now}</span></div>
+      <div class="area-chips" role="group" aria-label="Show events in">${chips}<button type="button" class="area-gps" data-area-gps>🎯 ${p.source === 'gps' ? 'Update my location' : 'Use my exact location'}</button></div></div>`;
+  }
+  // The first area slot on the page shows the bar (home page, or the first map / events widget on WordPress)
+  function fillBar(a) {
+    const hosts = [...document.querySelectorAll('.area-host')];
+    hosts.forEach((h, i) => { h.innerHTML = i === 0 ? barHtml(a) : ''; });
+  }
+  const emptyHtml = (a) => `<div class="empty" style="grid-column:1/-1"><div class="big">📍</div><h3>No upcoming events in ${esc(label(a.scope, a.place))} yet</h3><p class="muted">New events are added all the time. Check back soon, or look further afield.</p><button type="button" class="btn btn-primary" data-area-scope="all">Show events everywhere</button></div>`;
+  async function weatherPlace() {
+    const p = await place();
+    return p && Number.isFinite(p.lat) ? { name: p.city || p.region || p.country || 'Your area', lat: p.lat, lng: p.lng } : (typeof META !== 'undefined' && META.weatherPlace) || null;
+  }
+  async function center() {
+    const p = await place();
+    return p && Number.isFinite(p.lat) ? { lat: p.lat, lng: p.lng } : (META.maps && META.maps.center) || { lat: 25.0582, lng: -77.3431 };
+  }
+  const listeners = [];
+  const notify = () => listeners.slice().forEach((fn) => { try { fn(); } catch (e) { console.warn(e); } });
+  function setScope(s) { if (!SCOPES.includes(s)) return; saved.scope = s; save(); notify(); }
+  async function useExact() {
+    const p = await byGps();
+    p.at = Date.now(); saved.place = p; delete saved.scope; save();
+    placeP = Promise.resolve(p);
+    notify();
+    return p;
+  }
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest && e.target.closest('[data-area-scope], [data-area-gps]');
+    if (!b) return;
+    e.preventDefault();
+    if (b.dataset.areaScope) { setScope(b.dataset.areaScope); return; }
+    const was = b.textContent; b.disabled = true; b.textContent = '🎯 Finding you…';
+    try { const p = await useExact(); toast('📍 Location updated: ' + [p.city, p.region, p.country].filter(Boolean).join(', ')); }
+    catch (err) { toast(err.message, true); b.disabled = false; b.textContent = was; }
+  });
+  return { place, current, filter, match, barHtml, fillBar, emptyHtml, label, weatherPlace, center, setScope, useExact, onChange: (fn) => listeners.push(fn) };
+})();
+// When the visitor changes their area, redraw the home page (WordPress redraws its widgets instead)
+TJArea.onChange(() => { if (typeof tjAreaChanged === 'function') tjAreaChanged(); else if (!parseHash().parts[0]) route(); });
+
 // ---------- slim clock & weather bar (sits above the orange & blue box) ----------
 function infoBarHtml(o = {}) {
   if (o.showClock === false && o.showWeather === false) return '';
@@ -669,7 +837,12 @@ function mountCalendar(sec) {
   };
   const load = async (m) => {
     grid.style.opacity = '.5';
-    try { data = await api('/api/calendar' + (m ? '?month=' + m : '')); }
+    try {
+      data = await api('/api/calendar' + (m ? '?month=' + m : ''));
+      // only events in the visitor's area
+      const a = await TJArea.current();
+      data.events = (data.events || []).filter((e) => TJArea.match(e, a.scope, a.place));
+    }
     catch (e) { grid.style.opacity = ''; grid.innerHTML = `<div class="error" style="grid-column:1/-1">${esc(e.message)}</div>`; return; }
     grid.style.opacity = '';
     render();
@@ -696,6 +869,7 @@ async function pageHome(params) {
       <div class="hero-cta">${me?.role === 'organizer' ? '<a class="btn btn-green" href="#/create">+ Create an event</a>' : '<span>Hosting an event?</span><a class="link" href="#/register?role=organizer">Become an organizer →</a>'}</div>
     </section>
     <div class="chips">${chips}</div>
+    <div class="area-host"></div>
     <section class="map-section">
       <div class="section-head"><h2>🗺️ ${searchActive(sv) ? 'These events on the map' : 'Live events on the map'}</h2><span class="muted small" id="mapCount">Tap a pin to see the event</span></div>
       <div class="events-map" id="eventsMap"><div class="loading">Loading map…</div></div>
@@ -711,16 +885,22 @@ async function pageHome(params) {
   wireSearchForm($app.querySelector('form.search-adv'), sv, (p) => go('#/' + (p.toString() ? '?' + p : '')));
   mountCalendar($app.querySelector('.cal-section'));
   const p = searchParams(sv);
-  if (META.weatherPlace) TJGeo.homeWeather(document.getElementById('homeWx'), META.weatherPlace);
+  // Weather for where the visitor is (falls back to the site's own town)
+  TJArea.weatherPlace().then((wp) => { const el = document.getElementById('homeWx'); if (wp && el) TJGeo.homeWeather(el, wp); });
   startHomeClock();
-  const { events } = await api('/api/events?' + p);
+  const [{ events: all }, area] = await Promise.all([api('/api/events?' + p), TJArea.current()]);
+  if (!document.getElementById('grid')) return;
+  const { events } = await TJArea.filter(all, sv);
+  TJArea.fillBar({ ...area, searched: !!(sv.q || sv.venue || sv.organizer) });
+  const where = area.place && area.scope !== 'all' && !(sv.q || sv.venue || sv.organizer) ? ' in ' + TJArea.label(area.scope, area.place) : '';
   const mapEl = document.getElementById('eventsMap');
   const pinned = events.filter((e) => Number.isFinite(e.lat));
-  document.getElementById('mapCount').textContent = pinned.length ? `${pinned.length} event${pinned.length === 1 ? '' : 's'} · tap a pin to see the event` : 'No mapped events yet';
-  TJGeo.eventsMap(mapEl, events, { googleKey: META.maps?.googleMapsKey, center: META.maps?.center || { lat: 25.0582, lng: -77.3431 } })
+  document.getElementById('mapCount').textContent = pinned.length ? `${pinned.length} event${pinned.length === 1 ? '' : 's'}${where} · tap a pin to see the event` : `No mapped events${where} yet`;
+  TJGeo.eventsMap(mapEl, events, { googleKey: META.maps?.googleMapsKey, center: await TJArea.center() })
     .catch(() => { mapEl.innerHTML = '<div class="empty" style="box-shadow:none">Map could not be loaded right now.</div>'; });
-  document.getElementById('count').textContent = `${events.length} event${events.length === 1 ? '' : 's'}`;
+  document.getElementById('count').textContent = `${events.length} event${events.length === 1 ? '' : 's'}${where}`;
   document.getElementById('grid').innerHTML = events.length ? events.map(card).join('')
+    : all.length && where ? TJArea.emptyHtml(area)
     : `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div><h3>No events found</h3><p class="muted">Try another search, or <a href="#/">clear the search</a>.</p></div>`;
 }
 
@@ -1015,6 +1195,27 @@ async function pageCart() {
 }
 
 const orderPdfHref = (id) => (typeof TJ !== 'undefined' && TJ.rest ? `${TJ.rest}orders/${encodeURIComponent(id)}/tickets.pdf?_wpnonce=${TJ.nonce}` : `/api/orders/${encodeURIComponent(id)}/tickets.pdf`);
+// ---------- secure checkout: trust badges + accepted cards (centered at the bottom of checkout) ----------
+const CARD_LOGOS = {
+  visa: '<svg viewBox="0 0 64 40" width="64" height="40" role="img" aria-label="Visa"><rect width="64" height="40" rx="6" fill="#fff" stroke="#d9dde5"/><text x="32" y="26.5" text-anchor="middle" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="17" font-style="italic" font-weight="900" letter-spacing=".5" fill="#1A1F71">VISA</text><rect x="10" y="30.5" width="44" height="2.4" rx="1.2" fill="#F7B600"/></svg>',
+  mastercard: '<svg viewBox="0 0 64 40" width="64" height="40" role="img" aria-label="Mastercard"><rect width="64" height="40" rx="6" fill="#fff" stroke="#d9dde5"/><circle cx="26" cy="17" r="10" fill="#EB001B"/><circle cx="38" cy="17" r="10" fill="#F79E1B"/><path d="M32 9a10 10 0 0 1 0 16 10 10 0 0 1 0-16z" fill="#FF5F00"/><text x="32" y="35" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="6.2" font-weight="700" fill="#231F20">mastercard</text></svg>',
+  amex: '<svg viewBox="0 0 64 40" width="64" height="40" role="img" aria-label="American Express"><rect width="64" height="40" rx="6" fill="#006FCF"/><text x="32" y="18" text-anchor="middle" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="8.6" font-weight="900" fill="#fff" letter-spacing=".3">AMERICAN</text><text x="32" y="29" text-anchor="middle" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="8.6" font-weight="900" fill="#fff" letter-spacing=".3">EXPRESS</text></svg>',
+};
+function secureCheckoutHtml() {
+  const items = [
+    ['🔒', 'Secure checkout', 'Your details travel over an encrypted (SSL) connection.'],
+    ['💳', 'Card details protected', 'We never store your full card number.'],
+    ...(META.captcha?.checkout ? [['🛡️', 'Fraud protection', 'A robot check blocks automated fraud.']] : []),
+    ['🎟️', 'Guaranteed tickets', 'Unique QR tickets by email and text, right after you pay.'],
+  ];
+  return `<section class="secure-checkout" aria-label="Secure payment">
+    <div class="sc-head"><span class="sc-lock" aria-hidden="true">🔒</span> Secure payment</div>
+    <div class="sc-items">${items.map(([i, t, d]) => `<div class="sc-item"><span class="sc-ic" aria-hidden="true">${i}</span><div><strong>${t}</strong><span>${d}</span></div></div>`).join('')}</div>
+    <div class="sc-cards" aria-label="We accept Visa, Mastercard and American Express">${CARD_LOGOS.visa}${CARD_LOGOS.mastercard}${CARD_LOGOS.amex}</div>
+    <div class="sc-note">We accept Visa, Mastercard and American Express</div>
+  </section>`;
+}
+
 async function pageCartCheckout() {
   if (!me) { go('#/register?role=user&from=checkout&next=' + encodeURIComponent('#/cart/checkout')); return; }
   loading();
@@ -1072,7 +1273,8 @@ async function pageCartCheckout() {
         </div>
         <a class="btn btn-ghost btn-block btn-sm" style="margin-top:12px" href="#/cart">✏️ Change cart</a>
       </aside>
-    </div>`;
+    </div>
+    ${secureCheckoutHtml()}`;
   const cap = META.captcha?.checkout ? Captcha.mount(document.getElementById('ccCaptcha')) : null;
   document.getElementById('ccForm').onsubmit = async (e) => {
     e.preventDefault();
@@ -1197,7 +1399,8 @@ async function pageCheckout(id) {
         </div>
         <a class="btn btn-ghost btn-block btn-sm" style="margin-top:12px" href="#/event/${esc(ev.id)}">✏️ Change tickets</a>
       </aside>
-    </div>`;
+    </div>
+    ${secureCheckoutHtml()}`;
   const cap = META.captcha?.checkout ? Captcha.mount(document.getElementById('coCaptcha')) : null;
   document.getElementById('coForm').onsubmit = async (e) => {
     e.preventDefault();
