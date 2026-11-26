@@ -204,8 +204,9 @@ html, .tj-root { margin: 0; }
 .tj-root .footer-links { display: flex; gap: 18px; }
 .tj-root .footer a { color: #cfd5df; }
 
-.tj-root .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 12px 20px; border-radius: 12px; font-weight: 600; z-index: 100; box-shadow: var(--shadow); }
-.tj-root .toast.err { background: #b42318; }
+/* Confirmation pop-up: TicketJunkies green (same in light and dark mode); errors stay red */
+.tj-root .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #84d65f; color: #12161f; border: 1px solid #6fc04b; padding: 12px 20px; border-radius: 12px; font-weight: 700; z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+.tj-root .toast.err { background: #b42318; color: #fff; border-color: #b42318; }
 .tj-root .loading { padding: 60px; text-align: center; color: var(--muted); }
 
 @media (max-width: 900px) {

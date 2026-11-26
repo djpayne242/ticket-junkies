@@ -317,6 +317,9 @@ In **Create Event → Date & time** there are two dropdowns:
   - **Location:** "Choose a saved venue" fills in the main venue, address, city and map pin. **More venues** adds extra places for events held at more than one venue (up to 10 in total). Pick a saved venue or type one in; a saved venue's address fills in by itself.
   - **Event page:** lists every venue with its own Directions link. Event cards show "+N venues".
 
+## ✅ Green confirmation pop-ups (v1.3.6)
+- The confirmation message that pops up at the bottom of the screen after a change ("Saved", "Dark mode", "Added to the guest list"…) is now TicketJunkies green (#84d65f) with dark text, in both light and dark mode. Error messages are still red.
+
 ## 📷 "Ticket Scanner" menu name (v1.3.5)
 - The menu link **📷 Scan** is now **📷 Ticket Scanner**, and the bottom tab in the phone app says **Ticket Scanner** (kept on one line). On WordPress the Scanner page is now titled **Ticket Scanner**. Existing sites are renamed once on the next wp-admin visit, but only if the page is still called "Scanner", so a title you chose yourself is kept.
 
