@@ -51,6 +51,31 @@ class TJ_Notify {
   }
   public static function qr_url($code) { return rest_url('tj/v1/qr/' . $code . '.png'); }
   public static function ticket_link($o) { return self::route('#/t/' . $o['id'] . '/' . $o['key']); }
+  public static function ticket_key($o, $code) { return substr(hash_hmac('sha256', (string) $code, (string) $o['key']), 0, 20); }
+  public static function ticket_pdf_link($o, $t) { return add_query_arg(array('code' => rawurlencode($t['code']), 'tk' => self::ticket_key($o, $t['code'])), rest_url('tj/v1/tickets/' . $o['id'] . '/pdf')); }
+  public static function order_pdf_link($o) { return add_query_arg(array('k' => $o['key']), rest_url('tj/v1/tickets/' . $o['id'] . '/pdf')); }
+  public static function ticket_pdf_name($ev, $o, $suffix = '') {
+    $slug = substr(trim(preg_replace('/[^\w]+/', '-', (string) (isset($ev['title']) ? $ev['title'] : 'Event')), '-'), 0, 40);
+    return 'TicketJunkies-' . $slug . '-' . ($suffix !== '' ? $suffix : strtoupper(substr($o['id'], -8))) . '.pdf';
+  }
+  private static function pdf_attachment($o, $ev, $tickets, $suffix = '') {
+    if (!class_exists('TJ_Export')) return null;
+    $o['tickets'] = array_values($tickets);
+    return array('filename' => self::ticket_pdf_name($ev, $o, $suffix), 'content' => TJ_Export::tickets_pdf($o, $ev, self::site()));
+  }
+  /** Table of every ticket on an order and who it belongs to (organizer + admin sale emails) */
+  private static function attendee_table($o) {
+    $th = 'style="text-align:left;padding:8px 10px;border-bottom:2px solid #e5e7eb;font-size:11px;color:#6b7280;text-transform:uppercase"';
+    $td = 'style="padding:8px 10px;border-bottom:1px solid #eef0f3;vertical-align:top"';
+    $rows = '';
+    foreach (array_values($o['tickets']) as $i => $t) {
+      $nm = !empty($t['holderName']) ? $t['holderName'] : $o['buyerName'];
+      $em = !empty($t['holderEmail']) ? $t['holderEmail'] : $o['buyerEmail'];
+      $pr = !empty($t['price']) ? self::money($t['price']) : (!empty($o['comp']) ? 'Comp' : 'Free');
+      $rows .= '<tr><td ' . $td . '>' . ($i + 1) . '</td><td ' . $td . '><strong>' . self::h($nm) . '</strong><br><span style="color:#6b7280">' . self::h($em) . '</span></td><td ' . $td . '>' . self::h($t['tierName']) . '<br><span style="color:#6b7280">' . $pr . '</span></td><td style="padding:8px 10px;border-bottom:1px solid #eef0f3;vertical-align:top;font-family:Menlo,Consolas,monospace;font-weight:700;color:#376eb8">' . self::h($t['code']) . '</td></tr>';
+    }
+    return '<h3 style="font-size:15px;margin:20px 0 8px">👥 Attendees (' . count($o['tickets']) . ')</h3><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px"><tr><th ' . $th . '>#</th><th ' . $th . '>Attendee</th><th ' . $th . '>Ticket</th><th ' . $th . '>Code</th></tr>' . $rows . '</table>';
+  }
   public static function event_link($ev) { return self::route('#/event/' . $ev['id']); }
   private static function first_name($name) { $p = preg_split('/\s+/', trim((string) $name)); return $p[0]; }
   private static function ref($o) { return strtoupper(substr($o['id'], -8)); }
@@ -381,9 +406,8 @@ class TJ_Notify {
     $items = array();
     foreach ($o['items'] as $i) $items[] = $i['qty'] . ' × ' . self::h($i['tierName']) . ' (' . ($comp ? 'Complimentary' : ($i['price'] ? self::money($i['price']) : 'Free')) . ')';
     $itemsHtml = implode('<br>', $items);
-    $qrBlocks = '';
-    foreach ($o['tickets'] as $t) {
-      $qrBlocks .= '
+    $qrBlock = function ($t) use ($ev) {
+      return '
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 14px;border:2px dashed #eb742a;border-radius:14px"><tr>
         <td style="padding:14px;width:170px" valign="middle"><img src="' . self::h(self::qr_url($t['code'])) . '" width="160" height="160" alt="QR code ' . self::h($t['code']) . '" style="display:block;width:160px;height:160px;border:0"></td>
         <td style="padding:14px 14px 14px 0" valign="middle">
@@ -391,8 +415,22 @@ class TJ_Notify {
           <div style="font-size:17px;font-weight:800;margin:4px 0">' . self::h($ev['title']) . '</div>
           <div style="font-size:13px;color:#6b7280">' . self::h(self::when($ev['startsAt'])) . '<br>' . self::h($ev['venue']) . ', ' . self::h($ev['city']) . '</div>
           <div style="font-family:Menlo,Consolas,monospace;font-size:18px;font-weight:800;color:#376eb8;margin-top:8px;letter-spacing:1px">' . self::h($t['code']) . '</div>
+          ' . (!empty($t['holderName']) ? '<div style="font-size:13px;font-weight:700;margin-top:6px">👤 ' . self::h($t['holderName']) . '</div>' : '') . '
         </td></tr></table>';
+    };
+    $qrBlocks = implode('', array_map($qrBlock, $o['tickets']));
+    $pngs = function ($list) { $out = array(); if (class_exists('TJ_QR')) foreach ($list as $t) $out[] = array('filename' => $t['code'] . '.png', 'content' => TJ_QR::png($t['code'], 10)); return $out; };
+    $withPdf = function ($pdf, $rest) { return $pdf ? array_merge(array($pdf), $rest) : $rest; };
+    $buyerMail = strtolower((string) $o['buyerEmail']);
+    // Tickets for other people with their own email address, grouped per person
+    $guests = array();
+    if (!$comp) foreach ($o['tickets'] as $t) {
+      if (empty($t['holderEmail']) || $t['holderEmail'] === $buyerMail) continue;
+      if (!isset($guests[$t['holderEmail']])) $guests[$t['holderEmail']] = array('name' => $t['holderName'], 'email' => $t['holderEmail'], 'tickets' => array());
+      $guests[$t['holderEmail']]['tickets'][] = $t;
     }
+    $guestNames = array();
+    foreach ($guests as $g) $guestNames[] = '<strong>' . self::h($g['name']) . '</strong> (' . self::h($g['email']) . ')';
     $first = self::h(self::first_name($o['buyerName']));
     if ($comp) {
       $fromRaw = (!empty($ev['organizerName']) ? $ev['organizerName'] : ($p ? ($p['organization'] ? $p['organization'] : $p['name']) : 'The organizer'));
@@ -418,22 +456,48 @@ class TJ_Notify {
       'preheader' => $qty . ' ticket' . self::s($qty) . ' for ' . $ev['title'] . ' — show the QR code at the door.',
       'body' => '<p>Hi ' . $first . ', thanks for your order! Show the QR code below at the door — on your phone or printed. Each ticket admits one person and can be scanned once.</p>
         ' . $qrBlocks . '
+        <p style="margin:0 0 16px"><a href="' . self::h(self::order_pdf_link($o)) . '" style="display:inline-block;background:#376eb8;color:#ffffff;font-weight:700;text-decoration:none;padding:10px 16px;border-radius:10px">⬇ Download tickets (PDF)</a></p>
+        ' . ($guests ? '<p style="background:#eef7e9;border-radius:10px;padding:12px 14px;margin:0 0 14px">📧 We also emailed each guest their own ticket: ' . implode(', ', $guestNames) . '.</p>' : '') . '
         ' . self::detail_table(array_merge(self::ev_rows($ev), array(array('Tickets', $itemsHtml), array('Subtotal', self::money($o['subtotal'])), array('Service fees', self::money($o['fees'])), array('Total paid', '<strong>' . self::money($o['total']) . '</strong>' . (!empty($o['cardLast4']) ? ' <span style="color:#6b7280;font-weight:400">(card •••• ' . self::h($o['cardLast4']) . ')</span>' : '')), array('Order #', self::h(self::ref($o)))))) . '
-        <p style="font-size:13px;color:#6b7280">QR codes are also attached as images, and you can always open your tickets from the button below.</p>',
+        <p style="font-size:13px;color:#6b7280">Your tickets are attached as a PDF (easy to print, save or share) and as QR images. You can always open them from the button below.</p>',
       'cta' => array('label' => 'View my tickets', 'url' => self::ticket_link($o)),
-      'attachments' => self::qr_attachments($o),
+      'attachments' => $withPdf(self::pdf_attachment($o, $ev, $o['tickets']), $pngs($o['tickets'])),
     ));
     if ($sendSms && !empty($o['buyerPhone'])) self::sms(array('to' => $o['buyerPhone'], 'tag' => 'buyer.tickets', 'body' => 'TicketJunkies: You\'re going to ' . $ev['title'] . '! ' . $qty . ' ticket' . self::s($qty) . ', ' . self::when($ev['startsAt']) . ' @ ' . $ev['venue'] . '. Order ' . self::ref($o) . ', total ' . self::money($o['total']) . '. Your QR tickets: ' . self::ticket_link($o)));
     if (!empty($opts['buyerOnly'])) return;
 
+    // Each guest: their own ticket(s) + a PDF they can download or share
+    foreach ($guests as $g) {
+      $n = count($g['tickets']);
+      $gFirst = self::first_name($g['name']);
+      $links = '';
+      foreach ($g['tickets'] as $t) $links .= '<a href="' . self::h(self::ticket_pdf_link($o, $t)) . '" style="display:inline-block;background:#376eb8;color:#ffffff;font-weight:700;text-decoration:none;padding:10px 16px;border-radius:10px;margin:0 6px 6px 0">⬇ Download ticket ' . self::h($t['code']) . ' (PDF)</a>';
+      $tiers = implode('<br>', array_map(function ($t) { return self::h($t['tierName']); }, $g['tickets']));
+      $suffix = $n > 1 ? self::ref($o) . '-' . substr(preg_replace('/[^\w]+/', '-', $g['name']), 0, 20) : $g['tickets'][0]['code'];
+      self::mail($g['email'], 'Your ticket' . self::s($n) . ': ' . $ev['title'], array(
+        'tag' => 'buyer.attendee',
+        'heading' => "You're going, " . $gFirst . '! 🎟️',
+        'preheader' => $o['buyerName'] . ' got you ' . ($n > 1 ? $n . ' tickets' : 'a ticket') . ' for ' . $ev['title'] . '.',
+        'body' => '<p>Hi ' . self::h($gFirst) . ', <strong>' . self::h($o['buyerName']) . '</strong> got you ' . ($n > 1 ? $n . ' tickets' : 'a ticket') . ' for <strong>' . self::h($ev['title']) . '</strong>. Show the QR code below at the door, on your phone or printed. Each ticket admits one person and can be scanned once.</p>
+          ' . implode('', array_map($qrBlock, $g['tickets'])) . '
+          <p style="margin:0 0 16px">' . $links . '</p>
+          ' . self::detail_table(array_merge(self::ev_rows($ev), array(array('Ticket', $tiers), array('From', self::h(self::first_name($o['buyerName'])) . ' (' . self::h($o['buyerEmail']) . ')')))) . '
+          <p style="font-size:13px;color:#6b7280">Your ticket is attached as a PDF you can save, print or share, plus a QR image.</p>',
+        'cta' => array('label' => 'Download my ticket' . self::s($n) . ' (PDF)', 'url' => self::ticket_pdf_link($o, $g['tickets'][0])),
+        'attachments' => $withPdf(self::pdf_attachment($o, $ev, $g['tickets'], $suffix), $pngs($g['tickets'])),
+      ));
+    }
+
     // Organizer: sale notification + sold-out alerts
+    $buyerCell = '<strong>' . self::h($o['buyerName']) . '</strong><br><span style="color:#6b7280;font-weight:400">' . self::h($o['buyerEmail']) . (!empty($o['buyerPhone']) ? '<br>' . self::h($o['buyerPhone']) : '') . '</span>';
+    $orderCell = self::h(self::ref($o)) . ' · ' . self::h(self::when($o['createdAt']));
     if ($p) {
       $stats = TJ_Rest::event_stats($ev);
       self::mail($p['email'], '🎟️ ' . $qty . ' ticket' . self::s($qty) . ' sold — ' . $ev['title'], array(
         'tag' => 'organizer.sale',
         'heading' => 'You sold ' . $qty . ' ticket' . self::s($qty) . '!',
         'preheader' => $o['buyerName'] . ' bought ' . $qty . ' ticket' . self::s($qty) . ' for ' . $ev['title'] . '.',
-        'body' => self::detail_table(array(array('Event', '<strong>' . self::h($ev['title']) . '</strong>'), array('Buyer', self::h($o['buyerName']) . '<br><span style="color:#6b7280;font-weight:400">' . self::h($o['buyerEmail']) . '</span>'), array('Tickets', $itemsHtml), array('Your revenue (this order)', '<strong>' . self::money($o['subtotal']) . '</strong>'), array('Total sold', $stats['sold'] . ' / ' . $stats['capacity']), array('Total revenue to date', self::money($stats['revenue'])))),
+        'body' => self::detail_table(array(array('Event', '<strong>' . self::h($ev['title']) . '</strong>'), array('When', self::h(self::when($ev['startsAt']))), array('Order #', $orderCell), array('Buyer', $buyerCell), array('Tickets', $itemsHtml), array('Your revenue (this order)', '<strong>' . self::money($o['subtotal']) . '</strong>'), array('Total sold', $stats['sold'] . ' / ' . $stats['capacity']), array('Total revenue to date', self::money($stats['revenue'])))) . self::attendee_table($o),
         'cta' => array('label' => 'View attendees', 'url' => self::route('#/attendees/' . $ev['id'])),
       ));
       foreach ($o['items'] as $it) {
@@ -447,7 +511,17 @@ class TJ_Notify {
     self::alert_admin('ticketSale', 'Sale: ' . $qty . ' × ' . $ev['title'] . ' (' . self::money($o['total']) . ')', array(
       'heading' => 'New ticket sale',
       'preheader' => $o['buyerName'] . ' paid ' . self::money($o['total']) . ' for ' . $ev['title'] . '.',
-      'body' => self::detail_table(array(array('Event', '<strong>' . self::h($ev['title']) . '</strong>'), array('Organizer', self::h((!empty($ev['organizerName']) ? $ev['organizerName'] : ($p ? ($p['organization'] ? $p['organization'] : $p['name']) : '')))), array('Buyer', self::h($o['buyerName']) . ' · ' . self::h($o['buyerEmail']) . (!empty($o['buyerPhone']) ? ' · ' . self::h($o['buyerPhone']) : '')), array('Tickets', $itemsHtml), array('Ticket sales', self::money($o['subtotal'])), array('Platform fees (yours)', '<strong>' . self::money($o['fees']) . '</strong>'), array('Total collected', self::money($o['total'])))),
+      'body' => self::detail_table(array_values(array_filter(array_merge(self::ev_rows($ev), array(
+        array('Organizer', self::h((!empty($ev['organizerName']) ? $ev['organizerName'] : ($p ? ($p['organization'] ? $p['organization'] : $p['name']) : ''))) . ($p ? '<br><span style="color:#6b7280;font-weight:400">' . self::h($p['email']) . (!empty($p['phone']) ? ' · ' . self::h($p['phone']) : '') . '</span>' : '')),
+        array('Order #', $orderCell),
+        array('Buyer', $buyerCell),
+        array('Tickets', $itemsHtml),
+        array('Ticket sales', self::money($o['subtotal'])),
+        array('Platform fees (yours)', '<strong>' . self::money($o['fees']) . '</strong>'),
+        array('Total collected', '<strong>' . self::money($o['total']) . '</strong>'),
+        !empty($o['cardLast4']) ? array('Payment', self::h(!empty($o['cardBrand']) ? $o['cardBrand'] : 'Card') . ' •••• ' . self::h($o['cardLast4']) . (!empty($o['cardHolder']) ? ' · ' . self::h($o['cardHolder']) : '')) : null,
+        $guests ? array('Guest emails sent', (string) count($guests)) : null,
+      ))))) . self::attendee_table($o),
       'cta' => array('label' => 'View orders', 'url' => self::route('#/admin/orders')),
     ));
   }

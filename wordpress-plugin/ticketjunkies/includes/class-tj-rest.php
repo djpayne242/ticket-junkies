@@ -983,6 +983,23 @@ class TJ_Rest {
     return array('ok' => true, 'deleted' => true);
   }
 
+  /** Optional name + email for each ticket ("Who's coming?"). Each person with an email gets their own ticket email + PDF. */
+  private static function ticket_holders($list, $count) {
+    $att = is_array($list) ? array_values($list) : array();
+    $out = array();
+    for ($i = 0; $i < $count; $i++) {
+      $a = isset($att[$i]) && is_array($att[$i]) ? $att[$i] : array();
+      $name = self::str(self::g($a, 'name'), 'Name for ticket ' . ($i + 1), 80);
+      $email = strtolower(self::str(self::g($a, 'email'), 'Email for ticket ' . ($i + 1), 160));
+      if ($email !== '' && (!self::valid_email($email) || !is_email($email))) self::fail(400, 'Enter a valid email for ticket ' . ($i + 1));
+      if ($email !== '' && $name === '') self::fail(400, 'Enter a name for ticket ' . ($i + 1));
+      $h = array();
+      if ($name !== '') { $h['holderName'] = $name; if ($email !== '') $h['holderEmail'] = $email; }
+      $out[] = $h;
+    }
+    return $out;
+  }
+
   public static function r_checkout($c) {
     $user = self::require_user();
     $body = $c['body'];
@@ -1043,6 +1060,8 @@ class TJ_Rest {
     if (!self::valid_email($buyerEmail)) self::fail(400, 'Enter a valid email address');
     $buyerPhone = TJ_Notify::normalize_phone(self::g($body, 'buyerPhone'));
     if (!$buyerPhone) self::fail(400, 'Enter a valid mobile number so we can text your tickets');
+    $tcount = 0; foreach ($lines as $l) $tcount += $l['qty'];
+    $holders = self::ticket_holders(self::g($body, 'attendees'), $tcount);
 
     $subtotal = 0; $fees = 0;
     foreach ($lines as $l) { $subtotal += $l['unit'] * $l['qty']; $fees += self::ticket_fee($l['unit']) * $l['qty']; }
@@ -1071,7 +1090,7 @@ class TJ_Rest {
     foreach ($lines as $l) {
       $ev['tiers'][$l['ti']]['sold'] += $l['qty'];
       $t = $ev['tiers'][$l['ti']];
-      for ($i = 0; $i < $l['qty']; $i++) $tickets[] = array('code' => self::ticket_code(), 'tierId' => $t['id'], 'tierName' => $t['name'], 'price' => self::n($l['unit']), 'checkedIn' => false);
+      for ($i = 0; $i < $l['qty']; $i++) $tickets[] = array_merge(array('code' => self::ticket_code(), 'tierId' => $t['id'], 'tierName' => $t['name'], 'price' => self::n($l['unit']), 'checkedIn' => false), $holders[count($tickets)]);
       $item = array('tierId' => $t['id'], 'tierName' => $t['name'], 'price' => self::n($l['unit']), 'qty' => $l['qty']);
       if ($l['donation']) $item['donation'] = true;
       $oitems[] = $item;
@@ -1150,13 +1169,12 @@ class TJ_Rest {
     return array('order' => self::order_view($o));
   }
 
-  private static function send_ticket_pdf($o) {
+  private static function send_ticket_pdf($o, $suffix = '') {
     $ev = TJ_Store::get_event($o['eventId']);
     if (!$ev) $ev = array('title' => 'Event');
     if (!class_exists('TJ_Export')) self::fail(500, 'PDF export is not available');
     $buf = TJ_Export::tickets_pdf($o, $ev, TJ_Notify::site());
-    $slug = substr(trim(preg_replace('/[^\w]+/', '-', (string) $ev['title']), '-'), 0, 40);
-    self::send_binary('application/pdf', $buf, 'TicketJunkies-' . $slug . '-' . strtoupper(substr($o['id'], -8)) . '.pdf');
+    self::send_binary('application/pdf', $buf, TJ_Notify::ticket_pdf_name($ev, $o, $suffix));
   }
   private static function can_see_order($user, $o) {
     if ($o['userId'] === $user['id'] || $user['role'] === 'admin') return true;
@@ -1172,6 +1190,16 @@ class TJ_Rest {
   private static function key_ok($o, $k) { return $o && $k !== '' && strlen($k) === strlen($o['key']) && hash_equals($o['key'], $k); }
   public static function r_ticket_pdf($c) {
     $o = TJ_Store::get_order($c['params']['id']);
+    // One person's ticket (link in an attendee's email): only that ticket, never the rest of the order
+    $code = (string) self::q($c, 'code');
+    if ($code !== '') {
+      $tk = (string) self::q($c, 'tk');
+      $one = null;
+      if ($o) foreach ($o['tickets'] as $t) if ($t['code'] === $code) $one = $t;
+      if (!$one || !hash_equals(TJ_Notify::ticket_key($o, $code), $tk)) self::fail(404, 'Ticket not found');
+      $o['tickets'] = array($one);
+      self::send_ticket_pdf($o, $code);
+    }
     if (!self::key_ok($o, (string) self::q($c, 'k'))) self::fail(404, 'Tickets not found');
     self::send_ticket_pdf($o);
   }
@@ -1232,7 +1260,7 @@ class TJ_Rest {
     foreach (TJ_Store::orders() as $o) {
       if ($o['eventId'] !== $ev['id'] || $o['status'] === 'refunded') continue;
       foreach ($o['tickets'] as $t) {
-        $att[] = array_merge(array('code' => $t['code'], 'tierName' => $t['tierName'], 'price' => $t['price'], 'checkedIn' => !empty($t['checkedIn']), 'checkedInAt' => self::g($t, 'checkedInAt') ? $t['checkedInAt'] : null, 'buyerName' => $o['buyerName']),
+        $att[] = array_merge(array('code' => $t['code'], 'tierName' => $t['tierName'], 'price' => $t['price'], 'checkedIn' => !empty($t['checkedIn']), 'checkedInAt' => self::g($t, 'checkedInAt') ? $t['checkedInAt'] : null, 'holderName' => (string) self::g($t, 'holderName', ''), 'holderEmail' => (string) self::g($t, 'holderEmail', ''), 'buyerName' => $o['buyerName']),
           self::split_name($o),
           array('buyerEmail' => $o['buyerEmail'], 'buyerPhone' => (string) self::g($o, 'buyerPhone', ''), 'orderId' => $o['id'], 'purchasedAt' => $o['createdAt'], 'test' => !empty($o['test']), 'comp' => !empty($o['comp']), 'compNote' => (string) self::g($o, 'compNote', ''), 'issuedBy' => (string) self::g($o, 'issuedBy', '')));
       }
@@ -1253,7 +1281,7 @@ class TJ_Rest {
         $o['tickets'][$k]['checkedIn'] = true;
         $o['tickets'][$k]['checkedInAt'] = TJ_Store::now_iso();
         TJ_Store::save_order($o);
-        return array('ok' => true, 'ticket' => array('code' => $code, 'tierName' => $t['tierName'], 'buyerName' => $o['buyerName']));
+        return array('ok' => true, 'ticket' => array('code' => $code, 'tierName' => $t['tierName'], 'buyerName' => self::g($t, 'holderName') ? $t['holderName'] : $o['buyerName']));
       }
     }
     self::fail(404, 'No ticket ' . $code . ' for this event');

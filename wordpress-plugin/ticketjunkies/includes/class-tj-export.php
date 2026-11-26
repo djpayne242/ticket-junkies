@@ -801,7 +801,7 @@ final class TJ_Export {
 			$ops[] = self::rgb('E5E7EB') . ' RG 1 w ' . self::js_num($cx + 30) . ' ' . self::js_num($codeY - 22) . ' m ' . self::js_num($cx + $cw - 30) . ' ' . self::js_num($codeY - 22) . ' l S';
 			$price = self::g($t, 'price');
 			$details = array(
-				array('Attendee', self::g($order, 'buyerName')),
+				array('Attendee', self::g($t, 'holderName') ? $t['holderName'] : self::g($order, 'buyerName')),
 				array('Order #', self::upper(self::js_slice($order_id, -8))),
 				array('Price', self::truthy(self::g($order, 'comp')) ? 'Complimentary' : (self::truthy($price) ? '$' . self::to_fixed($price, 2) : 'Free')),
 			);

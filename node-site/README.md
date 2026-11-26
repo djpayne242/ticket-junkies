@@ -28,6 +28,14 @@ The owner account controls the Admin Panel and can also post events ("My Events"
 
 **Countdowns:** every event card shows a large "⏳ Goes live in" countdown with Days / Hours / Minutes / Seconds boxes counting down to the event's start time, the event page has a large "This event goes live in" Days / Hours / Minutes / Seconds countdown, and the calendar pop-up shows one too. When the event starts it switches to "Live now" ("🔴 This event is LIVE now!" on the event page), then "Ended".
 
+**Ticket sale emails:**
+- **Buyer:** a QR code for every ticket, plus all tickets attached as one PDF (and QR images), with a "Download tickets (PDF)" button.
+- **Each guest:** at checkout, "Who's coming?" lets the buyer add a name and email for every ticket after the first. Each guest with an email gets their own email with only their ticket(s), a PDF attachment and a personal download link (`/api/tickets/<order>/pdf?code=…&tk=…`). The link is signed per ticket, so it never opens the rest of the order. Their name is printed on the PDF and shown at check-in.
+- **Organizer:** order number and time, buyer name, email and phone, ticket types, revenue, and a table of every attendee (name, email, ticket type, code).
+- **Admin:** everything above, plus organizer contact, platform fees, total collected, payment card (brand, last 4, name on card) and how many guest emails were sent.
+- **Complimentary tickets:** still email only the recipient.
+- **Attendee list and CSV:** show each ticket's attendee, with "Bought by" when someone else paid.
+
 **Log in & security (Admin → Settings → 🔐 Log in & security):**
 - **Log-in timer:** how long attendees/organizers stay logged in, and a separate (usually shorter) time for administrators, from 1 hour to 90 days.
 - **Automatic log-out after no activity:** off, or 5 minutes to 4 hours. A "Still there?" warning with a **Stay logged in** button appears 1 minute before. Activity in any open tab counts. The server also ends idle sessions, and the log-in page explains why the person was logged out.

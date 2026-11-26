@@ -504,6 +504,18 @@ const when = (iso) => new Date(iso).toLocaleString('en-US', { weekday: 'short', 
 const adminRecipients = () => (N().adminEmail ? N().adminEmail.split(/[,;\s]+/).filter(Boolean) : activeAdmins().map((u) => u.email));
 const organizerOf = (ev) => db.users.find((u) => u.id === ev.organizerId);
 const ticketLink = (o) => `${site()}/#/t/${o.id}/${o.key}`;
+const ticketKey = (o, code) => crypto.createHmac('sha256', o.key).update(code).digest('hex').slice(0, 20);
+const ticketPdfLink = (o, t) => `${site()}/api/tickets/${o.id}/pdf?code=${encodeURIComponent(t.code)}&tk=${ticketKey(o, t.code)}`;
+const orderPdfLink = (o) => `${site()}/api/tickets/${o.id}/pdf?k=${o.key}`;
+const ticketPdfName = (ev, o, suffix = '') => `TicketJunkies-${String(ev.title || 'Event').replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}-${suffix || o.id.slice(-8).toUpperCase()}.pdf`;
+const pdfAttachment = (o, ev, tickets, suffix = '') => ({ filename: ticketPdfName(ev, o, suffix), content: ticketsPdf({ ...o, tickets }, ev, qrMatrix, { site: site() }) });
+// Table of every ticket on an order and who it belongs to (organizer + admin sale emails)
+function attendeeTable(o) {
+  const th = 'style="text-align:left;padding:8px 10px;border-bottom:2px solid #e5e7eb;font-size:11px;color:#6b7280;text-transform:uppercase"';
+  const td = 'style="padding:8px 10px;border-bottom:1px solid #eef0f3;vertical-align:top"';
+  const rows = o.tickets.map((t, i) => `<tr><td ${td}>${i + 1}</td><td ${td}><strong>${h(t.holderName || o.buyerName)}</strong><br><span style="color:#6b7280">${h(t.holderEmail || o.buyerEmail)}</span></td><td ${td}>${h(t.tierName)}<br><span style="color:#6b7280">${t.price ? money(t.price) : o.comp ? 'Comp' : 'Free'}</span></td><td style="padding:8px 10px;border-bottom:1px solid #eef0f3;vertical-align:top;font-family:Menlo,Consolas,monospace;font-weight:700;color:#376eb8">${h(t.code)}</td></tr>`).join('');
+  return `<h3 style="font-size:15px;margin:20px 0 8px">👥 Attendees (${o.tickets.length})</h3><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px"><tr><th ${th}>#</th><th ${th}>Attendee</th><th ${th}>Ticket</th><th ${th}>Code</th></tr>${rows}</table>`;
+}
 const eventLink = (ev) => `${site()}/#/event/${ev.id}`;
 const evRows = (ev) => [['Event', `<strong>${h(ev.title)}</strong>`], ['When', h(when(ev.startsAt))], ['Where', h([ev.venue, ev.address, ev.city].filter(Boolean).join(', '))]];
 
@@ -605,7 +617,7 @@ const Notify = {
     const itemsHtml = o.items.map((i) => `${i.qty} × ${h(i.tierName)} (${o.comp ? 'Complimentary' : i.price ? money(i.price) : 'Free'})`).join('<br>');
 
     // Buyer: email with a QR code for every ticket
-    const qrBlocks = o.tickets.map((t) => `
+    const qrBlock = (t) => `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 14px;border:2px dashed #eb742a;border-radius:14px"><tr>
         <td style="padding:14px;width:170px" valign="middle"><img src="${site()}/qr/${t.code}.png" width="160" height="160" alt="QR code ${t.code}" style="display:block;width:160px;height:160px;border:0"></td>
         <td style="padding:14px 14px 14px 0" valign="middle">
@@ -613,7 +625,14 @@ const Notify = {
           <div style="font-size:17px;font-weight:800;margin:4px 0">${h(ev.title)}</div>
           <div style="font-size:13px;color:#6b7280">${h(when(ev.startsAt))}<br>${h(ev.venue)}, ${h(ev.city)}</div>
           <div style="font-family:Menlo,Consolas,monospace;font-size:18px;font-weight:800;color:#376eb8;margin-top:8px;letter-spacing:1px">${t.code}</div>
-        </td></tr></table>`).join('');
+          ${t.holderName ? `<div style="font-size:13px;font-weight:700;margin-top:6px">👤 ${h(t.holderName)}</div>` : ''}
+        </td></tr></table>`;
+    const qrBlocks = o.tickets.map(qrBlock).join('');
+    const pngs = (list) => list.map((t) => ({ filename: `${t.code}.png`, content: qrPng(t.code, 10) }));
+    const buyerMail = String(o.buyerEmail || '').toLowerCase();
+    // Tickets for other people with their own email address, grouped per person
+    const guests = new Map();
+    if (!o.comp) for (const t of o.tickets) if (t.holderEmail && t.holderEmail !== buyerMail) { const g = guests.get(t.holderEmail) || { name: t.holderName, email: t.holderEmail, tickets: [] }; g.tickets.push(t); guests.set(t.holderEmail, g); }
     if (o.comp) {
       const from = h((ev?.organizerName || p?.organization || p?.name) || 'The organizer');
       if (sendEmail) mail(o.buyerEmail, `Complimentary tickets: ${ev.title}`, {
@@ -637,24 +656,45 @@ const Notify = {
       preheader: `${qty} ticket${qty > 1 ? 's' : ''} for ${ev.title} — show the QR code at the door.`,
       body: `<p>Hi ${h(o.buyerName.split(' ')[0])}, thanks for your order! Show the QR code below at the door — on your phone or printed. Each ticket admits one person and can be scanned once.</p>
         ${qrBlocks}
+        <p style="margin:0 0 16px"><a href="${orderPdfLink(o)}" style="display:inline-block;background:#376eb8;color:#ffffff;font-weight:700;text-decoration:none;padding:10px 16px;border-radius:10px">⬇ Download tickets (PDF)</a></p>
+        ${guests.size ? `<p style="background:#eef7e9;border-radius:10px;padding:12px 14px;margin:0 0 14px">📧 We also emailed each guest their own ticket: ${[...guests.values()].map((g) => `<strong>${h(g.name)}</strong> (${h(g.email)})`).join(', ')}.</p>` : ''}
         ${detailTable([...evRows(ev), ['Tickets', itemsHtml], ['Subtotal', money(o.subtotal)], ['Service fees', money(o.fees)], ['Total paid', `<strong>${money(o.total)}</strong>${o.cardLast4 ? ` <span style="color:#6b7280;font-weight:400">(card •••• ${h(o.cardLast4)})</span>` : ''}`], ['Order #', h(o.id.slice(-8).toUpperCase())]])}
-        <p style="font-size:13px;color:#6b7280">QR codes are also attached as images, and you can always open your tickets from the button below.</p>`,
+        <p style="font-size:13px;color:#6b7280">Your tickets are attached as a PDF (easy to print, save or share) and as QR images. You can always open them from the button below.</p>`,
       cta: { label: 'View my tickets', url: ticketLink(o) },
-      attachments: o.tickets.map((t) => ({ filename: `${t.code}.png`, content: qrPng(t.code, 10) })),
+      attachments: [pdfAttachment(o, ev, o.tickets), ...pngs(o.tickets)],
     });
 
     // Buyer: text message
     if (sendSms && o.buyerPhone) notifier.sms({ to: o.buyerPhone, tag: 'buyer.tickets', body: `TicketJunkies: You're going to ${ev.title}! ${qty} ticket${qty > 1 ? 's' : ''}, ${when(ev.startsAt)} @ ${ev.venue}. Order ${o.id.slice(-8).toUpperCase()}, total ${money(o.total)}. Your QR tickets: ${ticketLink(o)}` });
     if (opts.buyerOnly) return;
 
+    // Each guest: their own ticket(s) + a PDF they can download or share
+    const buyerFirst = h(o.buyerName.split(' ')[0]);
+    for (const g of guests.values()) {
+      const n = g.tickets.length;
+      mail(g.email, `Your ticket${n > 1 ? 's' : ''}: ${ev.title}`, {
+        tag: 'buyer.attendee',
+        heading: `You're going, ${g.name.split(' ')[0]}! 🎟️`,
+        preheader: `${o.buyerName} got you ${n > 1 ? n + ' tickets' : 'a ticket'} for ${ev.title}.`,
+        body: `<p>Hi ${h(g.name.split(' ')[0])}, <strong>${h(o.buyerName)}</strong> got you ${n > 1 ? n + ' tickets' : 'a ticket'} for <strong>${h(ev.title)}</strong>. Show the QR code below at the door, on your phone or printed. Each ticket admits one person and can be scanned once.</p>
+          ${g.tickets.map(qrBlock).join('')}
+          <p style="margin:0 0 16px">${g.tickets.map((t) => `<a href="${ticketPdfLink(o, t)}" style="display:inline-block;background:#376eb8;color:#ffffff;font-weight:700;text-decoration:none;padding:10px 16px;border-radius:10px;margin:0 6px 6px 0">⬇ Download ticket ${h(t.code)} (PDF)</a>`).join('')}</p>
+          ${detailTable([...evRows(ev), ['Ticket', g.tickets.map((t) => h(t.tierName)).join('<br>')], ['From', `${buyerFirst} (${h(o.buyerEmail)})`]])}
+          <p style="font-size:13px;color:#6b7280">Your ticket is attached as a PDF you can save, print or share, plus a QR image.</p>`,
+        cta: { label: `Download my ticket${n > 1 ? 's' : ''} (PDF)`, url: ticketPdfLink(o, g.tickets[0]) },
+        attachments: [pdfAttachment(o, ev, g.tickets, n > 1 ? `${o.id.slice(-8).toUpperCase()}-${g.name.replace(/[^\w]+/g, '-').slice(0, 20)}` : g.tickets[0].code), ...pngs(g.tickets)],
+      });
+    }
+
     // Organizer: sale notification + sold-out alerts
+    const buyerCell = `<strong>${h(o.buyerName)}</strong><br><span style="color:#6b7280;font-weight:400">${h(o.buyerEmail)}${o.buyerPhone ? '<br>' + h(o.buyerPhone) : ''}</span>`;
     if (p) {
       const stats = eventStats(ev);
       mail(p.email, `🎟️ ${qty} ticket${qty > 1 ? 's' : ''} sold — ${ev.title}`, {
         tag: 'organizer.sale',
         heading: `You sold ${qty} ticket${qty > 1 ? 's' : ''}!`,
         preheader: `${o.buyerName} bought ${qty} ticket${qty > 1 ? 's' : ''} for ${ev.title}.`,
-        body: `${detailTable([['Event', `<strong>${h(ev.title)}</strong>`], ['Buyer', `${h(o.buyerName)}<br><span style="color:#6b7280;font-weight:400">${h(o.buyerEmail)}</span>`], ['Tickets', itemsHtml], ['Your revenue (this order)', `<strong>${money(o.subtotal)}</strong>`], ['Total sold', `${stats.sold} / ${stats.capacity}`], ['Total revenue to date', money(stats.revenue)]])}`,
+        body: `${detailTable([['Event', `<strong>${h(ev.title)}</strong>`], ['When', h(when(ev.startsAt))], ['Order #', `${h(o.id.slice(-8).toUpperCase())} · ${h(when(o.createdAt))}`], ['Buyer', buyerCell], ['Tickets', itemsHtml], ['Your revenue (this order)', `<strong>${money(o.subtotal)}</strong>`], ['Total sold', `${stats.sold} / ${stats.capacity}`], ['Total revenue to date', money(stats.revenue)]])}${attendeeTable(o)}`,
         cta: { label: 'View attendees', url: `${site()}/#/attendees/${ev.id}` },
       });
       for (const it of o.items) {
@@ -667,7 +707,18 @@ const Notify = {
     alertAdmin('ticketSale', `Sale: ${qty} × ${ev.title} (${money(o.total)})`, {
       heading: 'New ticket sale',
       preheader: `${o.buyerName} paid ${money(o.total)} for ${ev.title}.`,
-      body: detailTable([['Event', `<strong>${h(ev.title)}</strong>`], ['Organizer', h((ev?.organizerName || p?.organization || p?.name) || '')], ['Buyer', `${h(o.buyerName)} · ${h(o.buyerEmail)}${o.buyerPhone ? ' · ' + h(o.buyerPhone) : ''}`], ['Tickets', itemsHtml], ['Ticket sales', money(o.subtotal)], ['Platform fees (yours)', `<strong>${money(o.fees)}</strong>`], ['Total collected', money(o.total)]]),
+      body: detailTable([
+        ...evRows(ev),
+        ['Organizer', `${h((ev?.organizerName || p?.organization || p?.name) || '')}${p ? `<br><span style="color:#6b7280;font-weight:400">${h(p.email)}${p.phone ? ' · ' + h(p.phone) : ''}</span>` : ''}`],
+        ['Order #', `${h(o.id.slice(-8).toUpperCase())} · ${h(when(o.createdAt))}`],
+        ['Buyer', buyerCell],
+        ['Tickets', itemsHtml],
+        ['Ticket sales', money(o.subtotal)],
+        ['Platform fees (yours)', `<strong>${money(o.fees)}</strong>`],
+        ['Total collected', `<strong>${money(o.total)}</strong>`],
+        o.cardLast4 && ['Payment', `${h(o.cardBrand || 'Card')} •••• ${h(o.cardLast4)}${o.cardHolder ? ` · ${h(o.cardHolder)}` : ''}`],
+        guests.size && ['Guest emails sent', String(guests.size)],
+      ]) + attendeeTable(o),
       cta: { label: 'View orders', url: `${site()}/#/admin/orders` },
     });
   },
@@ -1094,6 +1145,21 @@ route('DELETE', '/api/events/:id', ({ req, params }) => {
   return { ok: true, deleted: true };
 });
 
+// Optional name + email for each ticket ("Who's coming?"). Each person with an email gets their own ticket email + PDF.
+function ticketHolders(list, count) {
+  const att = Array.isArray(list) ? list : [];
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const a = att[i] && typeof att[i] === 'object' ? att[i] : {};
+    const name = str(a.name, { name: `Name for ticket ${i + 1}`, max: 80 });
+    const email = str(a.email, { name: `Email for ticket ${i + 1}`, max: 160 }).toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, `Enter a valid email for ticket ${i + 1}`);
+    if (email && !name) fail(400, `Enter a name for ticket ${i + 1}`);
+    out.push(name ? { holderName: name, ...(email ? { holderEmail: email } : {}) } : {});
+  }
+  return out;
+}
+
 route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
   const user = requireUser(req);
   // Verified first: everything after this point runs without pausing, so ticket counts can't be oversold.
@@ -1136,6 +1202,8 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
   const buyerPhone = normalizePhone(body.buyerPhone);
   if (!buyerPhone) fail(400, 'Enter a valid mobile number so we can text your tickets');
 
+  const holders = ticketHolders(body.attendees, lines.reduce((a, l) => a + l.qty, 0));
+
   const subtotal = round2(lines.reduce((a, l) => a + l.unit * l.qty, 0));
   const fees = round2(lines.reduce((a, l) => a + ticketFee(l.unit) * l.qty, 0));
   const total = round2(subtotal + fees);
@@ -1161,7 +1229,7 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
   for (const l of lines) {
     l.tier.sold += l.qty;
     for (let i = 0; i < l.qty; i++) {
-      tickets.push({ code: 'TJ-' + crypto.randomBytes(4).toString('hex').toUpperCase(), tierId: l.tier.id, tierName: l.tier.name, price: l.unit, checkedIn: false });
+      tickets.push({ code: 'TJ-' + crypto.randomBytes(4).toString('hex').toUpperCase(), tierId: l.tier.id, tierName: l.tier.name, price: l.unit, checkedIn: false, ...holders[tickets.length] });
     }
   }
   const order = {
@@ -1238,7 +1306,7 @@ route('GET', '/api/organizer/events/:id/attendees', ({ req, params }) => {
   const attendees = [];
   for (const o of db.orders.filter((x) => x.eventId === ev.id && x.status !== 'refunded')) {
     for (const t of o.tickets) {
-      attendees.push({ code: t.code, tierName: t.tierName, price: t.price, checkedIn: t.checkedIn, checkedInAt: t.checkedInAt || null, buyerName: o.buyerName, ...splitName(o), buyerEmail: o.buyerEmail, buyerPhone: o.buyerPhone || '', orderId: o.id, purchasedAt: o.createdAt, test: !!o.test, comp: !!o.comp, compNote: o.compNote || '', issuedBy: o.issuedBy || '' });
+      attendees.push({ code: t.code, tierName: t.tierName, price: t.price, checkedIn: t.checkedIn, checkedInAt: t.checkedInAt || null, holderName: t.holderName || '', holderEmail: t.holderEmail || '', buyerName: o.buyerName, ...splitName(o), buyerEmail: o.buyerEmail, buyerPhone: o.buyerPhone || '', orderId: o.id, purchasedAt: o.createdAt, test: !!o.test, comp: !!o.comp, compNote: o.compNote || '', issuedBy: o.issuedBy || '' });
     }
   }
   return { event: { ...publicEvent(ev, user), stats: eventStats(ev) }, attendees };
@@ -1256,7 +1324,7 @@ route('POST', '/api/organizer/checkin', ({ req, body }) => {
     t.checkedIn = true;
     t.checkedInAt = new Date().toISOString();
     saveDb();
-    return { ok: true, ticket: { code, tierName: t.tierName, buyerName: o.buyerName } };
+    return { ok: true, ticket: { code, tierName: t.tierName, buyerName: t.holderName || o.buyerName } };
   }
   fail(404, `No ticket ${code} for this event`);
 });
@@ -2075,10 +2143,10 @@ route('GET', '/api/tickets/:id', ({ params, query }) => {
 });
 
 // ---------- ticket downloads & resend (attendee dashboard) ----------
-function sendTicketPdf(res, o) {
+function sendTicketPdf(res, o, suffix = '') {
   const ev = db.events.find((e) => e.id === o.eventId) || { title: 'Event' };
   const buf = ticketsPdf(o, ev, qrMatrix, { site: site() });
-  const name = `TicketJunkies-${String(ev.title).replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}-${o.id.slice(-8).toUpperCase()}.pdf`;
+  const name = ticketPdfName(ev, o, suffix);
   res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': buf.length, 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'no-store' });
   res.end(buf);
   return RAW_SENT;
@@ -2092,6 +2160,14 @@ route('GET', '/api/orders/:id/tickets.pdf', ({ req, res, params }) => {
 });
 route('GET', '/api/tickets/:id/pdf', ({ res, params, query }) => {
   const o = db.orders.find((x) => x.id === params.id);
+  // One person's ticket (link in an attendee's email): only that ticket, never the rest of the order
+  const code = String(query.get('code') || ''), tk = String(query.get('tk') || '');
+  if (code) {
+    const t = o && o.tickets.find((x) => x.code === code);
+    const want = t ? ticketKey(o, code) : '';
+    if (!t || tk.length !== want.length || !crypto.timingSafeEqual(Buffer.from(tk), Buffer.from(want))) fail(404, 'Ticket not found');
+    return sendTicketPdf(res, { ...o, tickets: [t] }, code);
+  }
   const k = String(query.get('k') || '');
   if (!o || !k || k.length !== o.key.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(o.key))) fail(404, 'Tickets not found');
   return sendTicketPdf(res, o);

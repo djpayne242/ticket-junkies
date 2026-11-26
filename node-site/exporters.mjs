@@ -411,7 +411,7 @@ export function ticketsPdf(order, ev, qrMatrix, { site = '' } = {}) {
     const cb = winAnsi(t.code); ops.push(`BT /F3 22 Tf ${rgb('376EB8')} rg ${((W - cb.length * 13.2) / 2).toFixed(2)} ${codeY} Td ${pdfStr(cb)} Tj ET`);
     // details
     ops.push(`${rgb('E5E7EB')} RG 1 w ${cx + 30} ${codeY - 22} m ${cx + cw - 30} ${codeY - 22} l S`);
-    const details = [['Attendee', order.buyerName], ['Order #', order.id.slice(-8).toUpperCase()], ['Price', order.comp ? 'Complimentary' : (t.price ? `$${Number(t.price).toFixed(2)}` : 'Free')]];
+    const details = [['Attendee', t.holderName || order.buyerName], ['Order #', order.id.slice(-8).toUpperCase()], ['Price', order.comp ? 'Complimentary' : (t.price ? `$${Number(t.price).toFixed(2)}` : 'Free')]];
     const colW = (cw - 60) / 3;
     details.forEach(([k, v], i) => { const x0 = cx + 30 + i * colW; center(codeY - 44, k.toUpperCase(), 8.5, true, '9AA3B2', x0, colW); center(codeY - 60, String(v).slice(0, 28), 12, true, '1B1F2A', x0, colW); });
     if (order.status === 'refunded') { center(codeY - 90, 'REFUNDED - THIS TICKET IS NOT VALID', 13, true, 'C62828', cx, cw); }

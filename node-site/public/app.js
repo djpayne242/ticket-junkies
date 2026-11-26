@@ -840,6 +840,7 @@ async function pageCheckout(id) {
   const fees = round2(lines.reduce((a, t) => a + fee(amt[t.id]) * qty[t.id], 0));
   const total = round2(subtotal + fees);
   const count = lines.reduce((a, t) => a + qty[t.id], 0);
+  const slots = lines.flatMap((t) => Array(qty[t.id]).fill(t)); // one entry per ticket, same order the server creates them
   const np = String(me.name || '').trim().split(/\s+/);
   const nameParts = { first: np.length > 1 ? np.slice(0, -1).join(' ') : (np[0] || ''), last: np.length > 1 ? np[np.length - 1] : '' };
   $app.innerHTML = `
@@ -858,6 +859,17 @@ async function pageCheckout(id) {
             <div class="field"><label>Email for tickets & QR codes</label><input name="buyerEmail" type="email" autocomplete="email" required value="${esc(me.email)}" /></div>
             <div class="field"><label>Mobile number <span class="muted small">(we'll text your tickets)</span></label><input name="buyerPhone" type="tel" autocomplete="tel" required placeholder="242-555-1234" value="${esc(me.phone || '')}" /></div>
           </div>
+          ${count > 1 ? `
+          <h3 style="margin-top:10px">👥 Who's coming? <span class="muted small" style="font-weight:500">(optional)</span></h3>
+          <p class="muted small" style="margin-top:-4px">Ticket 1 is yours. Add a name and email for your guests and we'll email each person their own ticket with a PDF they can download or share. Leave a ticket blank to keep it in your email.</p>
+          <div class="att-list">${slots.map((t, i) => i === 0 ? '' : `
+            <div class="att-row">
+              <div class="att-label">Ticket ${i + 1} · ${esc(t.name)}</div>
+              <div class="row">
+                <div class="field"><label>Guest name</label><input data-att-name="${i}" maxlength="80" autocomplete="off" placeholder="Full name" /></div>
+                <div class="field"><label>Guest email</label><input data-att-email="${i}" type="email" maxlength="160" autocomplete="off" placeholder="name@example.com" /></div>
+              </div>
+            </div>`).join('')}</div>` : ''}
           ${total > 0 ? `
           <h3 style="margin-top:10px">💳 Payment</h3>
           <div class="notice">Demo mode — no real charge. Use any test card, e.g. 4242 4242 4242 4242.</div>
@@ -889,13 +901,20 @@ async function pageCheckout(id) {
     const f = Object.fromEntries(new FormData(e.target));
     f.buyerFirstName = (f.buyerFirstName || '').trim(); f.buyerLastName = (f.buyerLastName || '').trim();
     if (!f.buyerFirstName || !f.buyerLastName) { showErr('coErr', 'Please enter the attendee\'s first and last name.'); return; }
+    const attendees = slots.map((_, i) => {
+      if (!i) return {};
+      const v = (k) => ((document.querySelector(`[data-att-${k}="${i}"]`) || {}).value || '').trim();
+      return { name: v('name'), email: v('email') };
+    });
+    const missing = attendees.findIndex((a) => a.email && !a.name);
+    if (missing > 0) { showErr('coErr', `Please enter a name for ticket ${missing + 1}, or clear its email.`); return; }
     const captcha = cap ? cap.token() : '';
     if (cap && !captcha) { showErr('coErr', 'Please tick "I\'m not a robot" to complete your purchase.'); return; }
     const btn = document.getElementById('payBtn'); btn.disabled = true; btn.textContent = 'Processing…';
     try {
       const { order } = await api(`/api/events/${ev.id}/checkout`, { method: 'POST', body: {
         items: Object.entries(qty).filter(([, q]) => q > 0).map(([tierId, q]) => ({ tierId, qty: q, ...(amt[tierId] !== undefined ? { amount: amt[tierId] } : {}) })),
-        buyerFirstName: f.buyerFirstName, buyerLastName: f.buyerLastName, buyerEmail: f.buyerEmail, buyerPhone: f.buyerPhone,
+        buyerFirstName: f.buyerFirstName, buyerLastName: f.buyerLastName, buyerEmail: f.buyerEmail, buyerPhone: f.buyerPhone, attendees,
         payment: { cardHolder: f.cardHolder, cardNumber: f.cardNumber, expiry: f.expiry, cvc: f.cvc }, captcha,
       } });
       sessionStorage.removeItem('tj_cart');
@@ -1660,7 +1679,7 @@ async function pageAttendees(id) {
       </form>
     </div>
     ${attendees.length ? `<div class="table-wrap"><table><thead><tr><th>Attendee</th><th>Ticket</th><th>Code</th><th>Purchased</th><th>Status</th></tr></thead><tbody>
-      ${attendees.map((a) => `<tr><td><strong>${esc(a.buyerName)}</strong>${a.test ? ' <span class="badge test">Test</span>' : ''}${a.comp ? ' <span class="badge comp">🎁 Comp</span>' : ''}<div class="muted small">${esc(a.buyerEmail)}</div>${a.comp && a.compNote ? `<div class="muted small">“${esc(a.compNote)}”</div>` : ''}</td><td>${esc(a.tierName)}</td><td class="code" style="font-size:.9rem">${esc(a.code)}</td><td class="small">${esc(fmtShort(a.purchasedAt))}</td>
+      ${attendees.map((a) => `<tr><td><strong>${esc(a.holderName || a.buyerName)}</strong>${a.test ? ' <span class="badge test">Test</span>' : ''}${a.comp ? ' <span class="badge comp">🎁 Comp</span>' : ''}<div class="muted small">${esc(a.holderEmail || a.buyerEmail)}</div>${a.holderName && a.holderName !== a.buyerName ? `<div class="muted small">Bought by ${esc(a.buyerName)}</div>` : ''}${a.comp && a.compNote ? `<div class="muted small">“${esc(a.compNote)}”</div>` : ''}</td><td>${esc(a.tierName)}</td><td class="code" style="font-size:.9rem">${esc(a.code)}</td><td class="small">${esc(fmtShort(a.purchasedAt))}</td>
       <td>${a.checkedIn ? `<span class="checked">✓ In at ${esc(fmtTime(a.checkedInAt))}</span>` : `<button class="btn btn-ghost btn-sm" data-ci="${esc(a.code)}">Check in</button>`}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty"><div class="big">🧾</div><h3>No tickets sold yet</h3><p class="muted">Share your event link to start selling.</p></div>'}`;
   const checkin = async (code) => {
@@ -1682,7 +1701,7 @@ async function pageAttendees(id) {
   $app.querySelectorAll('[data-ci]').forEach((b) => (b.onclick = () => checkin(b.dataset.ci)));
   document.getElementById('csvBtn').onclick = () => {
     const q = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
-    const csv = ['First Name,Last Name,Email,Ticket,Price,Code,Purchased,Checked In,Complimentary', ...attendees.map((a) => [a.buyerFirstName, a.buyerLastName, a.buyerEmail, a.tierName, a.price, a.code, a.purchasedAt, a.checkedIn ? 'yes' : 'no', a.comp ? 'yes' : 'no'].map(q).join(','))].join('\n');
+    const csv = ['First Name,Last Name,Email,Ticket,Price,Code,Purchased,Checked In,Complimentary,Attendee Name,Attendee Email', ...attendees.map((a) => [a.buyerFirstName, a.buyerLastName, a.buyerEmail, a.tierName, a.price, a.code, a.purchasedAt, a.checkedIn ? 'yes' : 'no', a.comp ? 'yes' : 'no', a.holderName || a.buyerName, a.holderEmail || a.buyerEmail].map(q).join(','))].join('\n');
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     link.download = `${ev.title.replace(/[^\w]+/g, '-')}-attendees.csv`; link.click();
