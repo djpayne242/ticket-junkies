@@ -5,9 +5,14 @@
 const TJ = Object.assign({ rest: '/wp-json/tj/v1/', nonce: '', home: '/', assets: '', pages: {}, editor: false }, window.TJ_CONFIG || {});
 let tjBooted = false;
 // Which WordPress page shows each part of the app. Keys of TJ.pages: home, event, checkout, tickets, organizer, admin, login, register, ticket
-const TJ_ROUTE_PAGE = { '': 'home', event: 'event', checkout: 'checkout', cart: 'checkout', order: 'checkout', tickets: 'tickets', dashboard: 'organizer', create: 'organizer', edit: 'organizer', attendees: 'organizer', reports: 'organizer', admin: 'admin', login: 'login', register: 'register', t: 'ticket', scan: 'organizer', app: 'tickets' };
+const TJ_ROUTE_PAGE = { '': 'home', event: 'event', checkout: 'checkout', cart: 'checkout', order: 'checkout', tickets: 'tickets', dashboard: 'organizer', create: 'organizer', edit: 'organizer', attendees: 'organizer', reports: 'organizer', admin: 'admin', login: 'login', register: 'register', t: 'ticket', scan: 'scanner', app: 'tickets' };
 const tjSeg = (hash) => String(hash || '').replace(/^#?\/?/, '').split(/[/?]/)[0];
-const tjPageOf = (hash) => (Object.prototype.hasOwnProperty.call(TJ_ROUTE_PAGE, tjSeg(hash)) ? TJ_ROUTE_PAGE[tjSeg(hash)] : 'home');
+const tjPageOf = (hash) => {
+  const key = Object.prototype.hasOwnProperty.call(TJ_ROUTE_PAGE, tjSeg(hash)) ? TJ_ROUTE_PAGE[tjSeg(hash)] : 'home';
+  // The scanner opens on the Scanner page (editable in Elementor). Sites without that page scan inside the Organizer Dashboard.
+  if (key === 'scanner') return (TJ_SCREEN && TJ_SCREEN.key === 'scanner') || TJ.pages.scanner ? 'scanner' : 'organizer';
+  return key;
+};
 function tjApi(url) { return /^https?:/.test(url) ? url : TJ.rest + String(url).replace(/^\/?api\//, ''); }
 // '#/event/evt_1' -> https://site/event/#/event/evt_1   ·   '#/?q=x' -> https://site/?q=x
 function tjRouteUrl(hash) {
@@ -24,7 +29,7 @@ const TJ_SCREEN_DEFAULT = {
   home: () => '#/',
   event: () => { const id = new URLSearchParams(location.search).get('id'); return id ? '#/event/' + id : (TJ.sampleEvent ? '#/event/' + TJ.sampleEvent : '#/event/'); },
   checkout: () => { try { const c = JSON.parse(sessionStorage.getItem('tj_cart') || 'null'); if (c && c.id) return '#/checkout/' + c.id; } catch {} return TJ.sampleEvent ? '#/checkout/' + TJ.sampleEvent : '#/checkout/'; },
-  tickets: () => '#/tickets', organizer: () => '#/dashboard', admin: () => '#/admin', login: () => '#/login', register: () => '#/register', ticket: () => '#/t',
+  tickets: () => '#/tickets', organizer: () => '#/dashboard', scanner: () => '#/scan', admin: () => '#/admin', login: () => '#/login', register: () => '#/register', ticket: () => '#/t',
 };
 function tjScreenAllows(hash) { return !!TJ_SCREEN && tjPageOf(hash) === TJ_SCREEN.key; }
 function tjCurrentRoute() {
@@ -3435,7 +3440,7 @@ async function pageScan(eventId) {
         <div class="scan-pick-num"><b>${e.stats.checkedIn}</b><span>/ ${e.stats.sold} in</span></div></a>`;
     $app.innerHTML = `
       <div class="scan-app">
-        <div class="section-head"><div><h1>📷 TJ Scanner</h1><div class="muted">Choose the event you're checking guests into.</div></div>${isStandalone() ? '' : '<button class="btn btn-ghost btn-sm" data-install="scanner">📲 Install scanner app</button>'}</div>
+        <div class="section-head"><div><h1>📷 TJ Scanner</h1><div class="muted">Choose the event you're checking guests into.</div></div></div>
         ${soon.length ? `<h3 class="scan-h">Today & upcoming</h3><div class="scan-picks">${soon.map(card).join('')}</div>` : ''}
         ${past.length ? `<h3 class="scan-h">Past events</h3><div class="scan-picks">${past.map(card).join('')}</div>` : ''}
         ${!live.length ? '<div class="empty"><div class="big">🎟️</div><h2>No events yet</h2><p class="muted">Create an event, sell tickets, then scan guests in here.</p><a class="btn btn-primary" href="#/create">+ Create Event</a></div>' : ''}
@@ -3483,7 +3488,6 @@ async function pageScan(eventId) {
         <button type="button" class="btn btn-ghost btn-sm" id="scanSound">${soundOn ? '🔊 Sound on' : '🔇 Sound off'}</button>
         <button type="button" class="btn btn-ghost btn-sm" id="scanFlip">🔄 Switch camera</button>
         <a class="btn btn-ghost btn-sm" href="#/attendees/${esc(ev.id)}">📋 Attendee page</a>
-        ${isStandalone() ? '' : '<button type="button" class="btn btn-ghost btn-sm" data-install="scanner">📲 Install scanner app</button>'}
       </div>
       <section class="gl" aria-label="Guest list and check-ins">
         <div class="gl-head"><h3 class="scan-h">👥 Guest list & check-ins</h3><button type="button" class="btn btn-primary btn-sm" id="glAddBtn">+ Add name</button></div>

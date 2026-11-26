@@ -8,6 +8,12 @@ final class TJ_Admin {
     add_action('admin_menu', [__CLASS__, 'menu']);
     add_action('admin_init', function () {
       if (!get_option('tj_pages') && current_user_can('manage_options') && class_exists('TJ_Frontend')) TJ_Frontend::install();
+      // v1.3.3: sites set up earlier get the new Scanner page once (if it's deleted later, it isn't forced back)
+      elseif (!get_option('tj_scanner_page_added') && current_user_can('manage_options') && class_exists('TJ_Frontend')) {
+        update_option('tj_scanner_page_added', 1);
+        $p = get_option('tj_pages', []);
+        if (empty($p['scanner'])) TJ_Frontend::install(false, 'scanner');
+      }
     });
     add_action('admin_post_tj_ui', [__CLASS__, 'save_ui']);
     add_action('admin_post_tj_pages', [__CLASS__, 'rebuild_pages']);

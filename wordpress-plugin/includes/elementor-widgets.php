@@ -84,6 +84,8 @@ class TJ_W_Register extends TJ_Screen_Widget { protected $tj_screen = 'register'
   public function get_name() { return 'tj_register'; } public function get_title() { return 'TJ Create Account Form'; } public function get_icon() { return 'eicon-person'; } }
 class TJ_W_Ticket extends TJ_Screen_Widget { protected $tj_screen = 'ticket'; protected $tj_desc = 'Ticket viewer opened from the links in ticket emails and texts (big QR codes + PDF download).';
   public function get_name() { return 'tj_ticket'; } public function get_title() { return 'TJ Ticket Viewer'; } public function get_icon() { return 'eicon-barcode'; } }
+class TJ_W_Scanner extends TJ_Screen_Widget { protected $tj_screen = 'scanner'; protected $tj_desc = 'Door Scanner for organizers: pick the event, scan ticket QR codes with the phone camera, see who is checked in and who is not, search attendees and keep a typed-in guest list. Only organizers and admins can use it.';
+  public function get_name() { return 'tj_scanner'; } public function get_title() { return 'TJ Door Scanner'; } public function get_icon() { return 'eicon-camera'; } }
 class TJ_W_Home extends TJ_Screen_Widget { protected $tj_screen = 'home'; protected $tj_desc = 'The complete original homepage in one block (hero, search, weather & clock, categories, map, events). Prefer the separate widgets for full Elementor control.';
   public function get_name() { return 'tj_home'; } public function get_title() { return 'TJ Complete Homepage'; } public function get_icon() { return 'eicon-home'; } }
 
@@ -211,5 +213,5 @@ class TJ_W_Cta extends TJ_Widget_Base { protected $tj_type = 'cta';
 }
 
 function tj_elementor_widget_classes() {
-  return ['TJ_W_Hero', 'TJ_W_Search', 'TJ_W_Weather', 'TJ_W_Cta', 'TJ_W_Chips', 'TJ_W_Map', 'TJ_W_Calendar', 'TJ_W_Grid', 'TJ_W_Event', 'TJ_W_Checkout', 'TJ_W_Tickets', 'TJ_W_Organizer', 'TJ_W_Admin', 'TJ_W_Login', 'TJ_W_Register', 'TJ_W_Ticket', 'TJ_W_Home'];
+  return ['TJ_W_Hero', 'TJ_W_Search', 'TJ_W_Weather', 'TJ_W_Cta', 'TJ_W_Chips', 'TJ_W_Map', 'TJ_W_Calendar', 'TJ_W_Grid', 'TJ_W_Event', 'TJ_W_Checkout', 'TJ_W_Tickets', 'TJ_W_Organizer', 'TJ_W_Admin', 'TJ_W_Login', 'TJ_W_Register', 'TJ_W_Ticket', 'TJ_W_Scanner', 'TJ_W_Home'];
 }

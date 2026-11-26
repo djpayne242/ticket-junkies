@@ -317,6 +317,12 @@ In **Create Event → Date & time** there are two dropdowns:
   - **Location:** "Choose a saved venue" fills in the main venue, address, city and map pin. **More venues** adds extra places for events held at more than one venue (up to 10 in total). Pick a saved venue or type one in; a saved venue's address fills in by itself.
   - **Event page:** lists every venue with its own Directions link. Event cards show "+N venues".
 
+## 📷 Scanner page you can edit in Elementor (v1.3.3)
+- **WordPress:** the Door Scanner now has its own page, **Scanner** (`/scanner/`), built with the new Elementor widget **TJ Door Scanner**. Open it with *Edit with Elementor* to add headings, pictures, banners or instructions above or below the scanner, or change its colors in the widget's Style tab. The widget can also be placed on any other page.
+- Sites set up before v1.3.3 get the Scanner page automatically the first time an admin opens wp-admin after updating. If you delete it later it isn't forced back, and scanning simply happens inside the Organizer Dashboard page again. *TicketJunkies → Start here → Re-create missing pages* brings it back.
+- The Door Scanner button on the dashboard, the **Scan** tab in the phone app and every scanner link open the Scanner page. The scanner app's home-screen shortcut starts there too.
+- **Install buttons removed** from the scanner (both the event picker and the scanning screen). Phones can still add the site to the home screen from the browser menu, and the separate *Get the app* page and footer link are unchanged.
+
 ## 🚪 Door Scanner on the dashboard + guest list (v1.3.2)
 - **Door Scanner button:** a big blue **📷 Door Scanner** button now sits at the very top of the Organizer Dashboard, so it's the first thing organizers see when they log in on their phone. It opens the scanner (`#/scan`), where they pick the event.
 - **Who's in and who isn't:** under the camera, the scanner shows **Guest list & check-ins** with three tabs: **Not checked in**, **Checked in** (with the time) and **Everyone**, each with a count. The big counter at the top counts everyone expected, including extra guests.

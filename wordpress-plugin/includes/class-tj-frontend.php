@@ -16,12 +16,20 @@ function tj_page_url($key) {
   return home_url('/');
 }
 
+/** True when the plugin page for $key exists and is published */
+function tj_has_page($key) {
+  $pages = get_option('tj_pages', []);
+  return !empty($pages[$key]) && get_post_status($pages[$key]) === 'publish';
+}
+
 /** Map an app route ('#/event/evt_x', '#/t/ord/key', '#/dashboard' …) to a full URL on the right page */
 function tj_route_url($hash) {
   $hash = '#/' . ltrim(preg_replace('~^#?/?~', '', (string) $hash), '/');
   $seg = preg_split('~[/?]~', substr($hash, 2))[0];
-  $map = ['' => 'home', 'event' => 'event', 'checkout' => 'checkout', 'order' => 'checkout', 'tickets' => 'tickets', 'dashboard' => 'organizer', 'create' => 'organizer', 'edit' => 'organizer', 'attendees' => 'organizer', 'reports' => 'organizer', 'admin' => 'admin', 'login' => 'login', 'register' => 'register', 't' => 'ticket', 'scan' => 'organizer', 'app' => 'tickets'];
+  $map = ['' => 'home', 'event' => 'event', 'checkout' => 'checkout', 'order' => 'checkout', 'tickets' => 'tickets', 'dashboard' => 'organizer', 'create' => 'organizer', 'edit' => 'organizer', 'attendees' => 'organizer', 'reports' => 'organizer', 'admin' => 'admin', 'login' => 'login', 'register' => 'register', 't' => 'ticket', 'scan' => 'scanner', 'app' => 'tickets'];
   $key = isset($map[$seg]) ? $map[$seg] : 'home';
+  // Sites without the separate Scanner page keep scanning inside the Organizer Dashboard page
+  if ($key === 'scanner' && !tj_has_page('scanner')) $key = 'organizer';
   $base = tj_page_url($key);
   if ($key === 'home') { $q = strpos($hash, '?') !== false ? substr($hash, strpos($hash, '?') + 1) : ''; return $base . ($q ? (strpos($base, '?') !== false ? '&' : '?') . $q : ''); }
   return $base . $hash;
@@ -32,6 +40,7 @@ final class TJ_Frontend {
     'event' => 'Event details & tickets', 'checkout' => 'Checkout', 'tickets' => 'My Ticket Dashboard (attendees)',
     'organizer' => 'Organizer Dashboard', 'admin' => 'Admin Panel', 'login' => 'Log in form', 'register' => 'Create account form',
     'ticket' => 'Ticket viewer (links in emails & texts)', 'home' => 'Complete homepage (all-in-one)',
+    'scanner' => 'Door Scanner (check-in & guest list)',
   ];
 
   public static function ui() {
@@ -132,7 +141,7 @@ final class TJ_Frontend {
   public static function manifest($kind) {
     $path = self::home_path();
     $img = TJ_URL . 'assets/img/';
-    $scan_start = wp_make_link_relative(add_query_arg('app', 'scanner', tj_page_url('organizer'))) . '#/scan';
+    $scan_start = wp_make_link_relative(add_query_arg('app', 'scanner', tj_page_url(tj_has_page('scanner') ? 'scanner' : 'organizer'))) . '#/scan';
     if ($kind === 'scanner') {
       return [
         'id' => $path . '?app=scanner', 'name' => 'TJ Scanner – door check-in', 'short_name' => 'TJ Scanner',
@@ -249,6 +258,7 @@ final class TJ_Frontend {
   public static function config() {
     $pages = [];
     foreach (['home', 'event', 'checkout', 'tickets', 'organizer', 'admin', 'login', 'register', 'ticket'] as $k) $pages[$k] = tj_page_url($k);
+    if (tj_has_page('scanner')) $pages['scanner'] = tj_page_url('scanner');
     $cfg = [
       'rest' => esc_url_raw(rest_url('tj/v1/')), 'nonce' => wp_create_nonce('wp_rest'), 'home' => home_url('/'),
       'assets' => TJ_URL . 'assets/', 'pages' => $pages, 'editor' => self::is_editor(),
@@ -383,15 +393,16 @@ final class TJ_Frontend {
       'home' => ['Home', 'home', 'home'], 'event' => ['Event', 'event', 'event'], 'checkout' => ['Checkout', 'checkout', 'checkout'],
       'tickets' => ['My Dashboard', 'my-tickets', 'tickets'], 'organizer' => ['Organizer Dashboard', 'organizer', 'organizer'],
       'admin' => ['Admin Panel', 'ticket-admin', 'admin'], 'login' => ['Log In', 'login', 'login'], 'register' => ['Create Account', 'register', 'register'],
-      'ticket' => ['Your Tickets', 'ticket', 'ticket'],
+      'ticket' => ['Your Tickets', 'ticket', 'ticket'], 'scanner' => ['Scanner', 'scanner', 'scanner'],
     ];
   }
 
   /** Creates the pages (built with Elementor when it is active) and Elementor site settings. Safe to run again. */
-  public static function install($force = false) {
+  public static function install($force = false, $only = null) {
     $pages = get_option('tj_pages', []);
     $elementor = did_action('elementor/loaded') || defined('ELEMENTOR_VERSION');
     foreach (self::page_defs() as $key => $def) {
+      if ($only && $key !== $only) continue;
       list($title, $slug, $screen) = $def;
       if (!$force && !empty($pages[$key]) && get_post_status($pages[$key]) && get_post_status($pages[$key]) !== 'trash') continue;
       $fallback = $key === 'home'

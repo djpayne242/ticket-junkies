@@ -3378,7 +3378,7 @@ async function pageScan(eventId) {
         <div class="scan-pick-num"><b>${e.stats.checkedIn}</b><span>/ ${e.stats.sold} in</span></div></a>`;
     $app.innerHTML = `
       <div class="scan-app">
-        <div class="section-head"><div><h1>📷 TJ Scanner</h1><div class="muted">Choose the event you're checking guests into.</div></div>${isStandalone() ? '' : '<button class="btn btn-ghost btn-sm" data-install="scanner">📲 Install scanner app</button>'}</div>
+        <div class="section-head"><div><h1>📷 TJ Scanner</h1><div class="muted">Choose the event you're checking guests into.</div></div></div>
         ${soon.length ? `<h3 class="scan-h">Today & upcoming</h3><div class="scan-picks">${soon.map(card).join('')}</div>` : ''}
         ${past.length ? `<h3 class="scan-h">Past events</h3><div class="scan-picks">${past.map(card).join('')}</div>` : ''}
         ${!live.length ? '<div class="empty"><div class="big">🎟️</div><h2>No events yet</h2><p class="muted">Create an event, sell tickets, then scan guests in here.</p><a class="btn btn-primary" href="#/create">+ Create Event</a></div>' : ''}
@@ -3426,7 +3426,6 @@ async function pageScan(eventId) {
         <button type="button" class="btn btn-ghost btn-sm" id="scanSound">${soundOn ? '🔊 Sound on' : '🔇 Sound off'}</button>
         <button type="button" class="btn btn-ghost btn-sm" id="scanFlip">🔄 Switch camera</button>
         <a class="btn btn-ghost btn-sm" href="#/attendees/${esc(ev.id)}">📋 Attendee page</a>
-        ${isStandalone() ? '' : '<button type="button" class="btn btn-ghost btn-sm" data-install="scanner">📲 Install scanner app</button>'}
       </div>
       <section class="gl" aria-label="Guest list and check-ins">
         <div class="gl-head"><h3 class="scan-h">👥 Guest list & check-ins</h3><button type="button" class="btn btn-primary btn-sm" id="glAddBtn">+ Add name</button></div>

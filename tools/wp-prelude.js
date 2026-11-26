@@ -3,9 +3,14 @@
 const TJ = Object.assign({ rest: '/wp-json/tj/v1/', nonce: '', home: '/', assets: '', pages: {}, editor: false }, window.TJ_CONFIG || {});
 let tjBooted = false;
 // Which WordPress page shows each part of the app. Keys of TJ.pages: home, event, checkout, tickets, organizer, admin, login, register, ticket
-const TJ_ROUTE_PAGE = { '': 'home', event: 'event', checkout: 'checkout', cart: 'checkout', order: 'checkout', tickets: 'tickets', dashboard: 'organizer', create: 'organizer', edit: 'organizer', attendees: 'organizer', reports: 'organizer', admin: 'admin', login: 'login', register: 'register', t: 'ticket', scan: 'organizer', app: 'tickets' };
+const TJ_ROUTE_PAGE = { '': 'home', event: 'event', checkout: 'checkout', cart: 'checkout', order: 'checkout', tickets: 'tickets', dashboard: 'organizer', create: 'organizer', edit: 'organizer', attendees: 'organizer', reports: 'organizer', admin: 'admin', login: 'login', register: 'register', t: 'ticket', scan: 'scanner', app: 'tickets' };
 const tjSeg = (hash) => String(hash || '').replace(/^#?\/?/, '').split(/[/?]/)[0];
-const tjPageOf = (hash) => (Object.prototype.hasOwnProperty.call(TJ_ROUTE_PAGE, tjSeg(hash)) ? TJ_ROUTE_PAGE[tjSeg(hash)] : 'home');
+const tjPageOf = (hash) => {
+  const key = Object.prototype.hasOwnProperty.call(TJ_ROUTE_PAGE, tjSeg(hash)) ? TJ_ROUTE_PAGE[tjSeg(hash)] : 'home';
+  // The scanner opens on the Scanner page (editable in Elementor). Sites without that page scan inside the Organizer Dashboard.
+  if (key === 'scanner') return (TJ_SCREEN && TJ_SCREEN.key === 'scanner') || TJ.pages.scanner ? 'scanner' : 'organizer';
+  return key;
+};
 function tjApi(url) { return /^https?:/.test(url) ? url : TJ.rest + String(url).replace(/^\/?api\//, ''); }
 // '#/event/evt_1' -> https://site/event/#/event/evt_1   ·   '#/?q=x' -> https://site/?q=x
 function tjRouteUrl(hash) {
@@ -22,7 +27,7 @@ const TJ_SCREEN_DEFAULT = {
   home: () => '#/',
   event: () => { const id = new URLSearchParams(location.search).get('id'); return id ? '#/event/' + id : (TJ.sampleEvent ? '#/event/' + TJ.sampleEvent : '#/event/'); },
   checkout: () => { try { const c = JSON.parse(sessionStorage.getItem('tj_cart') || 'null'); if (c && c.id) return '#/checkout/' + c.id; } catch {} return TJ.sampleEvent ? '#/checkout/' + TJ.sampleEvent : '#/checkout/'; },
-  tickets: () => '#/tickets', organizer: () => '#/dashboard', admin: () => '#/admin', login: () => '#/login', register: () => '#/register', ticket: () => '#/t',
+  tickets: () => '#/tickets', organizer: () => '#/dashboard', scanner: () => '#/scan', admin: () => '#/admin', login: () => '#/login', register: () => '#/register', ticket: () => '#/t',
 };
 function tjScreenAllows(hash) { return !!TJ_SCREEN && tjPageOf(hash) === TJ_SCREEN.key; }
 function tjCurrentRoute() {
