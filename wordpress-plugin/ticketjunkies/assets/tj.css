@@ -1180,6 +1180,15 @@ html:has(#tjPre) .tj-root .loading { color: transparent; }
 .tj-root .cover.big.has-img { aspect-ratio: 16 / 9; background: #0d1017; }
 .tj-root .cover.big.has-img .cover-img { object-fit: contain; }
 
+/* ---------- event page: choose tickets → add to cart → checkout ---------- */
+.tj-root .flow-steps { display: flex; gap: 4px; margin: 14px 0 8px; font-size: .74rem; font-weight: 700; color: var(--muted); }
+.tj-root .flow-steps span { flex: 1; text-align: center; padding: 5px 4px; border-radius: 8px; background: var(--chip); white-space: nowrap; }
+.tj-root .flow-steps span.on { background: var(--orange); color: #fff; }
+.tj-root .added-box { margin-top: 14px; border: 2px solid var(--green); border-radius: 14px; padding: 12px; background: rgba(132, 214, 95, .1); }
+.tj-root .added-msg { font-weight: 800; text-align: center; margin-bottom: 10px; }
+.tj-root .added-links { display: flex; justify-content: space-between; margin-top: 10px; font-size: .9rem; font-weight: 600; }
+@media (max-width: 420px) { .tj-root .flow-steps { font-size: .68rem; } }
+
 
 /* =========================================================
    WordPress / Elementor integration

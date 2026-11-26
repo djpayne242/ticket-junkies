@@ -41,7 +41,7 @@ The owner account controls the Admin Panel and can also post events ("My Events"
 
 **Shopping cart:**
 - **Header:** a 🛒 button with a count. On WordPress it is added to the TicketJunkies header and opens the Checkout page at `#/cart`.
-- **Event pages:** besides "Continue to checkout" (buy now), there is **Add to cart** / **Update cart**.
+- **Event pages (one flow):** 1 · Choose tickets → 2 · Add to cart → 3 · Checkout. The buy box shows these steps and a single **Add to cart** button. After adding, a green box says "✅ N tickets added to your cart" with a big **Checkout** button (plus Keep shopping and View cart). Events already in the cart show **Update cart** and **Checkout**. Checkout opens `#/cart/checkout`, after sign-up or log-in if needed. The cart and checkout pages show the steps Tickets → Cart → Checkout → Your tickets.
 - **Saving:** the cart is kept in the browser (localStorage `tj_basket`) for up to 30 days, works before logging in, and stays in step across tabs.
 - **Cart page (`#/cart`):** each event with a picture, date and venue, a quantity menu per ticket type, Remove, Empty cart and a live total. It rechecks availability: quantities are trimmed to what is left, the per-person limit and sales windows apply, and ended or cancelled events must be removed.
 - **Cart checkout (`#/cart/checkout`):** account required, one form, one payment. "Who's coming?" appears per event.

@@ -851,32 +851,40 @@ async function pageEvent(id) {
         <div><span class="muted">Service fees</span><span>${money(tt.fees)}</span></div>
         <div class="total"><span>Total</span><span>${money(tt.total)}</span></div>
       </div>
-      <button class="btn btn-primary btn-block" id="toCheckout" style="margin-top:14px" ${tt.count && buyable && tt.ok ? '' : 'disabled'}>${tt.count ? `Continue to checkout · ${tt.count} ticket${tt.count > 1 ? 's' : ''}` : 'Select tickets'}</button>
-      ${buyable ? `<button class="btn btn-ghost btn-block add-cart-btn" id="addCart" ${tt.count && tt.ok ? '' : 'disabled'}>🛒 ${inCart ? 'Update cart' : 'Add to cart'}${tt.count ? ` · ${tt.count} ticket${tt.count > 1 ? 's' : ''}` : ''}</button>` : ''}
-      ${inCart ? `<p class="small in-cart-note">🛒 ${cartCount(cartOnly(ev.id))} ticket${cartCount(cartOnly(ev.id)) === 1 ? '' : 's'} for this event in <a href="#/cart">your cart</a></p>` : ''}
+      ${!buyable ? '' : added ? `
+      <div class="added-box">
+        <div class="added-msg">✅ ${cartCount(cartOnly(ev.id))} ticket${cartCount(cartOnly(ev.id)) === 1 ? '' : 's'} added to your cart</div>
+        <button class="btn btn-primary btn-block btn-lg" id="goCheckout">Checkout · ${cartCount()} ticket${cartCount() === 1 ? '' : 's'} →</button>
+        <div class="added-links"><a href="#/">← Keep shopping</a><a href="#/cart">🛒 View cart</a></div>
+      </div>` : `
+      <div class="flow-steps"><span class="on">1 · Choose tickets</span><span>2 · Add to cart</span><span>3 · Checkout</span></div>
+      <button class="btn btn-primary btn-block btn-lg" id="addCart" ${tt.count && tt.ok ? '' : 'disabled'}>${tt.count ? `🛒 ${inCart ? 'Update cart' : 'Add to cart'} · ${tt.count} ticket${tt.count > 1 ? 's' : ''}` : 'Select tickets above'}</button>
+      ${inCart ? `<button class="btn btn-blue btn-block" id="goCheckout" style="margin-top:8px">Checkout · ${cartCount()} ticket${cartCount() === 1 ? '' : 's'} in cart →</button>` : ''}`}
       ${!me ? '<p class="muted small" style="text-align:center;margin:10px 0 0">🔒 You will create a free account (or log in) before checkout, so all your tickets are saved in your dashboard.</p>' : ''}`;
-    panel.querySelectorAll('select[data-tier]').forEach((s) => (s.onchange = () => { qty[s.dataset.tier] = Number(s.value); renderPicker(); }));
+    panel.querySelectorAll('select[data-tier]').forEach((s) => (s.onchange = () => { qty[s.dataset.tier] = Number(s.value); added = false; renderPicker(); }));
     panel.querySelectorAll('input[data-amt]').forEach((inp) => {
       inp.onchange = () => { amt[inp.dataset.amt] = inp.value === '' ? '' : round2(Number(inp.value)); renderPicker(); };
       inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); inp.onchange(); } };
     });
-    document.getElementById('toCheckout').onclick = () => {
-      sessionStorage.setItem('tj_cart', JSON.stringify({ id: ev.id, qty, amt }));
-      go('#/checkout/' + ev.id);
-    };
+    // Step 2: add to cart → the next step shown is Checkout
     const ac = document.getElementById('addCart');
     if (ac) ac.onclick = () => {
       cartPut(ev, qty, amt);
-      inCart = true;
-      toast(`🛒 Added to your cart · ${cartCount()} ticket${cartCount() === 1 ? '' : 's'} in total`);
+      inCart = true; added = true;
+      toast('🛒 Added to your cart');
       renderPicker();
+      const b = document.getElementById('goCheckout'); if (b) b.focus();
     };
+    // Step 3: checkout (pays for everything in the cart; asks to log in or sign up first if needed)
+    const gc = document.getElementById('goCheckout');
+    if (gc) gc.onclick = () => go('#/cart/checkout');
   }
 
   // a ticket type's sales just opened → show its quantity picker
   panel.addEventListener('tj:onsale', () => setTimeout(renderPicker, 300));
   // tickets for this event already in the shopping cart
   let inCart = !!cartLoad()[ev.id];
+  let added = false;
   if (inCart) { const c = cartLoad()[ev.id]; for (const t of ev.tiers) if (c.qty[t.id]) { qty[t.id] = Math.min(Number(c.qty[t.id]) || 0, tierCap(t)); if (c.amt && c.amt[t.id] !== undefined && tierKindOf(t) === 'donation') amt[t.id] = c.amt[t.id]; } }
   // restore cart after login redirect
   try {
@@ -969,6 +977,7 @@ async function pageCart() {
     return;
   }
   $app.innerHTML = `
+    <div class="checkout-steps"><span class="done">1 · Tickets ✓</span><span class="on">2 · Cart</span><span>3 · Checkout</span><span>4 · Your tickets</span></div>
     <div class="section-head"><div><h1>🛒 Your cart</h1><div class="muted">${t.count} ticket${t.count === 1 ? '' : 's'} for ${groups.filter((g) => !g.problem && g.lines.some((l) => l.qty)).length} event${groups.length === 1 ? '' : 's'} · pay for everything in one checkout</div></div><a class="small" href="#/">← Keep shopping</a></div>
     <div class="checkout-layout">
       <div class="cart-list">
@@ -1033,7 +1042,7 @@ async function pageCartCheckout() {
   const nameParts = { first: np.length > 1 ? np.slice(0, -1).join(' ') : (np[0] || ''), last: np.length > 1 ? np[np.length - 1] : '' };
   const slotsOf = (g) => g.lines.flatMap((l) => Array(l.qty).fill(l.t));
   $app.innerHTML = `
-    <div class="checkout-steps"><span class="done">1 · Cart</span><span class="done">2 · Account ✓</span><span class="on">3 · Checkout</span><span>4 · Your tickets</span></div>
+    <div class="checkout-steps"><span class="done">1 · Tickets ✓</span><span class="done">2 · Cart ✓</span><span class="on">3 · Checkout</span><span>4 · Your tickets</span></div>
     <div class="section-head"><div><a href="#/cart" class="small">← Back to cart</a><h1>Checkout</h1><div class="muted">Signed in as <strong>${esc(me.name)}</strong> (${esc(me.email)}) · your tickets will be saved to <a href="#/tickets">My Dashboard</a></div></div></div>
     <div class="checkout-layout">
       <div class="panel">
@@ -1111,7 +1120,7 @@ async function pageCartCheckout() {
       toast(`You're going! 🎉 ${n} ticket${n === 1 ? '' : 's'} saved to your dashboard`);
       window.scrollTo(0, 0);
       $app.innerHTML = `
-        <div class="checkout-steps"><span class="done">1 · Cart</span><span class="done">2 · Account ✓</span><span class="done">3 · Checkout</span><span class="on">4 · Your tickets</span></div>
+        <div class="checkout-steps"><span class="done">1 · Tickets ✓</span><span class="done">2 · Cart ✓</span><span class="done">3 · Checkout ✓</span><span class="on">4 · Your tickets</span></div>
         <div class="form-page"><div class="form-card" style="max-width:720px">
           <h1 class="display" style="font-size:2.2rem">🎉 You're going!</h1>
           <p>${n} ticket${n === 1 ? '' : 's'} for ${r.orders.length} event${r.orders.length === 1 ? '' : 's'}. We've emailed your QR tickets${r.orders.some((o) => o.tickets.some((x) => x.holderEmail)) ? ' and sent each guest their own ticket' : ''}. Total paid: <strong>${money(round2(r.orders.reduce((a, o) => a + o.total, 0)))}</strong>.</p>

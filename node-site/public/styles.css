@@ -1178,3 +1178,12 @@ html:has(#tjPre) .loading { color: transparent; }
 /* event page: show the whole flyer (no cropping) when the event has a picture */
 .cover.big.has-img { aspect-ratio: 16 / 9; background: #0d1017; }
 .cover.big.has-img .cover-img { object-fit: contain; }
+
+/* ---------- event page: choose tickets → add to cart → checkout ---------- */
+.flow-steps { display: flex; gap: 4px; margin: 14px 0 8px; font-size: .74rem; font-weight: 700; color: var(--muted); }
+.flow-steps span { flex: 1; text-align: center; padding: 5px 4px; border-radius: 8px; background: var(--chip); white-space: nowrap; }
+.flow-steps span.on { background: var(--orange); color: #fff; }
+.added-box { margin-top: 14px; border: 2px solid var(--green); border-radius: 14px; padding: 12px; background: rgba(132, 214, 95, .1); }
+.added-msg { font-weight: 800; text-align: center; margin-bottom: 10px; }
+.added-links { display: flex; justify-content: space-between; margin-top: 10px; font-size: .9rem; font-weight: 600; }
+@media (max-width: 420px) { .flow-steps { font-size: .68rem; } }
