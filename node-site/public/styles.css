@@ -1321,3 +1321,8 @@ html[data-tj-app] .topbar-inner .cart-btn { margin-left: auto; }
 .gl-del { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; font-size: .9rem; }
 .gl-del:hover { color: #c0392b; border-color: #c0392b; }
 .gl-empty { padding: 16px; text-align: center; border-radius: 12px; border: 1px dashed var(--line); }
+
+/* Scanner heading: Ticket Junkies icon on the left of the title */
+.scan-brand { display: flex; align-items: center; gap: 12px; }
+.scan-brand img { width: 44px; height: 44px; flex: none; object-fit: contain; }
+@media (max-width: 640px) { .scan-brand img { width: 36px; height: 36px; } }

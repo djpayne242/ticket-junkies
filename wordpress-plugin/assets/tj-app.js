@@ -3397,6 +3397,8 @@ function renderAppTabs() {
 window.addEventListener('storage', (e) => { if (e.key === CART_KEY) renderAppTabs(); });
 
 // ---------- door scanner (TJ Scanner) ----------
+// Ticket Junkies ticket icon shown next to the scanner heading (WordPress serves it from the plugin's assets)
+const TJ_ICON_URL = typeof TJ !== 'undefined' && TJ && TJ.assets ? TJ.assets + 'img/tj-icon.png' : '/tj-icon.png';
 let scanSession = null;
 function stopScanSession() {
   if (!scanSession) return;
@@ -3440,7 +3442,7 @@ async function pageScan(eventId) {
         <div class="scan-pick-num"><b>${e.stats.checkedIn}</b><span>/ ${e.stats.sold} in</span></div></a>`;
     $app.innerHTML = `
       <div class="scan-app">
-        <div class="section-head"><div><h1>📷 TJ Scanner</h1><div class="muted">Choose the event you're checking guests into.</div></div></div>
+        <div class="section-head"><div><h1 class="scan-brand"><img src="${esc(TJ_ICON_URL)}" alt="" width="44" height="44" />Ticket Junkies Scanner</h1><div class="muted">Choose the event you're checking guests into.</div></div></div>
         ${soon.length ? `<h3 class="scan-h">Today & upcoming</h3><div class="scan-picks">${soon.map(card).join('')}</div>` : ''}
         ${past.length ? `<h3 class="scan-h">Past events</h3><div class="scan-picks">${past.map(card).join('')}</div>` : ''}
         ${!live.length ? '<div class="empty"><div class="big">🎟️</div><h2>No events yet</h2><p class="muted">Create an event, sell tickets, then scan guests in here.</p><a class="btn btn-primary" href="#/create">+ Create Event</a></div>' : ''}

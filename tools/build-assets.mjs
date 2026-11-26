@@ -10,7 +10,7 @@ const OUT = path.resolve(here, '../ticketjunkies/assets');
 fs.mkdirSync(path.join(OUT, 'img', 'og'), { recursive: true });
 
 // ---------- images ----------
-for (const f of ['logo.png', 'favicon.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'scanner-192.png', 'scanner-512.png', 'scanner-touch.png']) fs.copyFileSync(path.join(SRC, f), path.join(OUT, 'img', f));
+for (const f of ['logo.png', 'favicon.png', 'tj-icon.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'scanner-192.png', 'scanner-512.png', 'scanner-touch.png']) fs.copyFileSync(path.join(SRC, f), path.join(OUT, 'img', f));
 // app worker (served by the plugin at /?tj_sw=1) and the QR reader used by the door scanner on iPhone
 fs.copyFileSync(path.join(SRC, 'sw.js'), path.join(OUT, 'sw.js'));
 fs.mkdirSync(path.join(OUT, 'vendor'), { recursive: true });

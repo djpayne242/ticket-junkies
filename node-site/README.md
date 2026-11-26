@@ -317,6 +317,9 @@ In **Create Event → Date & time** there are two dropdowns:
   - **Location:** "Choose a saved venue" fills in the main venue, address, city and map pin. **More venues** adds extra places for events held at more than one venue (up to 10 in total). Pick a saved venue or type one in; a saved venue's address fills in by itself.
   - **Event page:** lists every venue with its own Directions link. Event cards show "+N venues".
 
+## 🎟️ Scanner heading with the Ticket Junkies icon (v1.3.4)
+- The scanner's heading now reads **Ticket Junkies Scanner** (was "📷 TJ Scanner"), with the Ticket Junkies three-ticket icon on its left. The icon has a see-through background, so it suits light and dark mode. Files: `public/tj-icon.png` (Node) and `assets/img/tj-icon.png` (WordPress).
+
 ## 📷 Scanner page you can edit in Elementor (v1.3.3)
 - **WordPress:** the Door Scanner now has its own page, **Scanner** (`/scanner/`), built with the new Elementor widget **TJ Door Scanner**. Open it with *Edit with Elementor* to add headings, pictures, banners or instructions above or below the scanner, or change its colors in the widget's Style tab. The widget can also be placed on any other page.
 - Sites set up before v1.3.3 get the Scanner page automatically the first time an admin opens wp-admin after updating. If you delete it later it isn't forced back, and scanning simply happens inside the Organizer Dashboard page again. *TicketJunkies → Start here → Re-create missing pages* brings it back.

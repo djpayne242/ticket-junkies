@@ -1323,6 +1323,11 @@ html[data-tj-app] .tj-root .topbar-inner .cart-btn { margin-left: auto; }
 .tj-root .gl-del:hover { color: #c0392b; border-color: #c0392b; }
 .tj-root .gl-empty { padding: 16px; text-align: center; border-radius: 12px; border: 1px dashed var(--line); }
 
+/* Scanner heading: Ticket Junkies icon on the left of the title */
+.tj-root .scan-brand { display: flex; align-items: center; gap: 12px; }
+.tj-root .scan-brand img { width: 44px; height: 44px; flex: none; object-fit: contain; }
+@media (max-width: 640px) { .tj-root .scan-brand img { width: 36px; height: 36px; } }
+
 
 /* =========================================================
    WordPress / Elementor integration
