@@ -10,7 +10,11 @@ const OUT = path.resolve(here, '../ticketjunkies/assets');
 fs.mkdirSync(path.join(OUT, 'img', 'og'), { recursive: true });
 
 // ---------- images ----------
-for (const f of ['logo.png', 'favicon.png', 'apple-touch-icon.png']) fs.copyFileSync(path.join(SRC, f), path.join(OUT, 'img', f));
+for (const f of ['logo.png', 'favicon.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'scanner-192.png', 'scanner-512.png', 'scanner-touch.png']) fs.copyFileSync(path.join(SRC, f), path.join(OUT, 'img', f));
+// app worker (served by the plugin at /?tj_sw=1) and the QR reader used by the door scanner on iPhone
+fs.copyFileSync(path.join(SRC, 'sw.js'), path.join(OUT, 'sw.js'));
+fs.mkdirSync(path.join(OUT, 'vendor'), { recursive: true });
+fs.copyFileSync(path.join(SRC, 'vendor', 'jsQR.js'), path.join(OUT, 'vendor', 'jsQR.js'));
 for (const f of fs.readdirSync(path.join(SRC, 'og'))) fs.copyFileSync(path.join(SRC, 'og', f), path.join(OUT, 'img', 'og', f));
 fs.mkdirSync(path.join(OUT, 'img', 'preloader'), { recursive: true });
 for (const f of fs.readdirSync(path.join(SRC, 'preloader'))) fs.copyFileSync(path.join(SRC, 'preloader', f), path.join(OUT, 'img', 'preloader', f));
@@ -43,6 +47,9 @@ const prelude = fs.readFileSync(path.join(here, 'wp-prelude.js'), 'utf8');
 const appendix = fs.readFileSync(path.join(here, 'wp-widgets.js'), 'utf8');
 app = patch(app, [
   ["const preAsset = (f) => '/' + f;", "const preAsset = (f) => TJ.assets + 'img/' + f;"],
+  // app (install + offline): WordPress serves the worker and manifests from the site address
+  ["const APP_URLS = { sw: '/sw.js', swScope: '/', manifest: '/manifest.webmanifest', scannerManifest: '/scanner.webmanifest', jsqr: '/vendor/jsQR.js?v=1.4.0', appleIcon: '/apple-touch-icon.png', scannerIcon: '/scanner-touch.png', icon: '/icon-192.png', scannerIconBig: '/scanner-192.png' };",
+   "const TJ_HOME_PATH = (() => { try { return new URL(TJ.home, location.href).pathname; } catch { return '/'; } })();\nconst APP_URLS = { sw: TJ_HOME_PATH + '?tj_sw=1', swScope: TJ_HOME_PATH, manifest: TJ_HOME_PATH + '?tj_manifest=main', scannerManifest: TJ_HOME_PATH + '?tj_manifest=scanner', jsqr: TJ.assets + 'vendor/jsQR.js?v=1.4.0', appleIcon: TJ.assets + 'img/apple-touch-icon.png', scannerIcon: TJ.assets + 'img/scanner-touch.png', icon: TJ.assets + 'img/icon-192.png', scannerIconBig: TJ.assets + 'img/scanner-192.png' };"],
   ["const $app = document.getElementById('app');\nconst $nav = document.getElementById('nav');",
    "let $app = document.createElement('div');\nlet $nav = document.getElementById('nav') || document.createElement('nav');"],
   // REST base + WordPress nonce
@@ -93,6 +100,8 @@ app = patch(app, [
   try { META = await api('/api/meta'); } catch {}
   try { me = (await api('/api/auth/me')).user; } catch {}
   route();
+  registerAppWorker();
+  setTimeout(maybeAppBanner, 4000);
 })();`, `(async function boot() {
   const y = document.getElementById('year'); if (y) y.textContent = new Date().getFullYear();
   try { META = await api('/api/meta'); } catch {}
@@ -100,6 +109,8 @@ app = patch(app, [
   renderNav();
   tjMountAll(document);
   tjBooted = true;
+  registerAppWorker();
+  setTimeout(maybeAppBanner, 4000);
 })();`],
 ], 'app.js');
 // in-page "home" links of the stand-alone router become real homepage links

@@ -1189,6 +1189,100 @@ html:has(#tjPre) .tj-root .loading { color: transparent; }
 .tj-root .added-links { display: flex; justify-content: space-between; margin-top: 10px; font-size: .9rem; font-weight: 600; }
 @media (max-width: 420px) { .tj-root .flow-steps { font-size: .68rem; } }
 
+/* ---------- mobile app: install bar, "Get the app" page ---------- */
+.tj-root .app-banner { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 150; display: flex; align-items: center; gap: 12px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; box-shadow: 0 12px 40px rgba(0,0,0,.22); animation: popIn .2s ease; max-width: 560px; margin: 0 auto; }
+.tj-root .app-banner img { border-radius: 10px; flex: none; }
+.tj-root .app-banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.tj-root .app-banner-text span { color: var(--muted); font-size: .82rem; }
+.tj-root .app-banner-x { background: none; border: 0; color: var(--muted); font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 4px 6px; }
+.tj-root .app-hero { text-align: center; max-width: 640px; margin: 10px auto 26px; }
+.tj-root .app-hero img { border-radius: 20px; }
+.tj-root .app-hero h1 { font-size: 2.2rem; margin: 12px 0 6px; }
+.tj-root .app-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 20px; max-width: 920px; margin: 0 auto; }
+.tj-root .app-card-head { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; }
+.tj-root .app-card-head h2 { margin: 0; }
+.tj-root .app-card-head img { border-radius: 12px; }
+.tj-root .app-feats { list-style: none; padding: 0; margin: 0 0 16px; display: grid; gap: 8px; }
+.tj-root .install-steps { padding-left: 22px; margin: 4px 0 10px; display: grid; gap: 8px; }
+.tj-root .ios-share { display: inline-block; border: 1.5px solid currentColor; border-radius: 5px; padding: 0 5px; font-size: .85em; }
+html[data-tj-app] .tj-root .footer-links a[href*="app"] { display: none; }
+
+/* ---------- TJ Scanner (door check-in) ---------- */
+.tj-root .scan-app { max-width: 620px; margin: 0 auto; }
+.tj-root .scan-h { margin: 22px 0 10px; font-size: 1rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.tj-root .scan-picks { display: grid; gap: 10px; }
+.tj-root .scan-pick { display: flex; align-items: center; gap: 12px; justify-content: space-between; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; color: var(--ink); box-shadow: var(--shadow); }
+.tj-root .scan-pick:hover { text-decoration: none; border-color: var(--blue); }
+.tj-root .scan-pick.last { border-color: var(--blue); }
+.tj-root .scan-pick-num { text-align: right; white-space: nowrap; }
+.tj-root .scan-pick-num b { font-size: 1.4rem; display: block; line-height: 1; }
+.tj-root .scan-pick-num span { color: var(--muted); font-size: .8rem; }
+.tj-root .scan-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.tj-root .scan-back { font-size: 1.5rem; padding: 4px 10px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); color: var(--ink); }
+.tj-root .scan-back:hover { text-decoration: none; }
+.tj-root .scan-title { flex: 1; min-width: 0; }
+.tj-root .scan-title strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tj-root .scan-count { text-align: right; white-space: nowrap; }
+.tj-root .scan-count b { font-size: 1.7rem; line-height: 1; display: block; color: var(--green-d); }
+.tj-root .scan-count span { color: var(--muted); font-size: .8rem; }
+.tj-root .scan-stage { position: relative; background: #000; border-radius: 18px; overflow: hidden; aspect-ratio: 4 / 3; max-height: 56vh; width: 100%; }
+.tj-root .scan-stage video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tj-root .scan-stage video.mirror { transform: scaleX(-1); }
+.tj-root .scan-frame { position: absolute; inset: 14% 22%; pointer-events: none; }
+.tj-root .scan-frame i { position: absolute; width: 22%; height: 22%; border: 4px solid #fff; border-radius: 6px; opacity: .9; }
+.tj-root .scan-frame i:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+.tj-root .scan-frame i:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+.tj-root .scan-frame i:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+.tj-root .scan-frame i:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+.tj-root .scan-idle { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 6px; color: #fff; background: radial-gradient(circle, rgba(18,22,31,.55), rgba(18,22,31,.9)); padding: 16px; }
+.tj-root .scan-idle .btn { font-size: 1.1rem; padding: 14px 26px; }
+.tj-root .scan-result { display: flex; align-items: center; gap: 14px; margin-top: 12px; padding: 14px 16px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); min-height: 78px; transition: background .15s ease; }
+.tj-root .scan-result .sr-icon { width: 48px; height: 48px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 1.6rem; font-weight: 800; background: var(--bg); }
+.tj-root .scan-result .sr-title { font-weight: 800; font-size: 1.15rem; line-height: 1.2; }
+.tj-root .scan-result .sr-sub { font-size: .9rem; opacity: .85; }
+.tj-root .scan-result.ok { background: #1d7a46; border-color: #1d7a46; color: #fff; }
+.tj-root .scan-result.warn { background: #b7791f; border-color: #b7791f; color: #fff; }
+.tj-root .scan-result.bad { background: #c0392b; border-color: #c0392b; color: #fff; }
+.tj-root .scan-result.ok .sr-icon, .tj-root .scan-result.warn .sr-icon, .tj-root .scan-result.bad .sr-icon { background: rgba(255,255,255,.2); color: #fff; }
+.tj-root .scan-manual { display: flex; gap: 8px; margin-top: 12px; }
+.tj-root .scan-manual input { flex: 1; min-width: 0; padding: 11px 13px; border-radius: 10px; border: 1px solid var(--field-line, var(--line)); background: var(--card); color: var(--ink); font-size: 1rem; font-family: ui-monospace, Menlo, monospace; text-transform: uppercase; }
+.tj-root .scan-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.tj-root .scan-log { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.tj-root .scan-log li { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: .9rem; }
+.tj-root .scan-log .sl-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tj-root .scan-log .code { font-family: ui-monospace, Menlo, monospace; font-size: .85rem; }
+.tj-root .scan-log .sl-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--muted); }
+.tj-root .scan-log .sl-ok .sl-dot { background: #1d7a46; }
+.tj-root .scan-log .sl-warn .sl-dot { background: #b7791f; }
+.tj-root .scan-log .sl-bad .sl-dot { background: #c0392b; }
+@media (max-width: 600px) {
+  .tj-root .scan-stage { aspect-ratio: 3 / 4; max-height: 52vh; }
+  .tj-root .scan-frame { inset: 20% 12%; }
+  .tj-root .app-hero h1 { font-size: 1.7rem; }
+}
+
+/* ---------- inside the App Store / Google Play app ---------- */
+/* Header: logo + cart only, clear of the phone's status bar; the website footer is replaced by the tab bar. */
+html[data-tj-app] .tj-root .topbar { padding-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)); }
+html[data-tj-app] .tj-root .topbar-inner { height: 58px; gap: 12px; }
+html[data-tj-app] .tj-root .brand img { height: 34px; width: auto; }
+html[data-tj-app] .tj-root .menu-btn, html[data-tj-app] .tj-root .theme-switch { display: none; }
+html[data-tj-app] .tj-root .footer, html[data-tj-app] .tj-root .tj-site-footer { display: none; }
+html[data-tj-app] { -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+.tj-root .app-tabs-space { height: calc(66px + max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px))); }
+html[data-tj-app] .tj-root .toast { bottom: calc(84px + max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px))); }
+html[data-tj-app] .tj-root .nav.open { display: flex; }
+.tj-root .app-tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 120; display: grid; grid-template-columns: repeat(4, 1fr); background: var(--card); border-top: 1px solid var(--line); padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px)); box-shadow: 0 -6px 20px rgba(20, 30, 60, .06); }
+.tj-root .app-tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; height: 62px; color: var(--muted); font-size: .72rem; font-weight: 600; text-decoration: none; }
+.tj-root .app-tab:hover { text-decoration: none; }
+.tj-root .app-tab svg { display: block; }
+.tj-root .app-tab.on { color: var(--orange); }
+.tj-root .app-tab:active { transform: scale(.94); }
+.tj-root .app-tab-badge { position: absolute; top: 7px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--orange); color: #fff; font-size: .7rem; line-height: 18px; text-align: center; }
+html[data-tj-app] .tj-root .scan-app.scanning .scan-stage { max-height: 48vh; }
+html[data-tj-app] .tj-root .nav { top: 100%; max-height: 70vh; }
+html[data-tj-app] .tj-root .topbar-inner .cart-btn { margin-left: auto; }
+
 
 /* =========================================================
    WordPress / Elementor integration

@@ -2325,7 +2325,7 @@ function serveStatic(req, res, pathname, search = '') {
   // Files with ?v= in the address (and uploaded images, whose names never change) are cached for a year.
   // The page itself is always re-checked so visitors get the newest version straight away.
   const versioned = /[?&]v=/.test(search) || rel.startsWith('/uploads/');
-  const cache = ext === '.html' ? 'no-cache' : versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=86400, stale-while-revalidate=604800';
+  const cache = ext === '.html' || ext === '.webmanifest' || rel === '/sw.js' ? 'no-cache' : versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=86400, stale-while-revalidate=604800';
   const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache, 'ETag': e.etag, ...SECURITY_HEADERS };
   if (COMPRESSIBLE.has(ext)) headers['Vary'] = 'Accept-Encoding';
   // The page includes the preloader settings, so its version tag changes when they change.

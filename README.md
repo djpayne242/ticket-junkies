@@ -10,6 +10,7 @@ This repository has **two versions of the same website**:
 | [`dist/ticketjunkies-wordpress-plugin.zip`](dist/ticketjunkies-wordpress-plugin.zip) | The same plugin, ready to upload | **Plugins → Add New → Upload Plugin** in WordPress |
 | [`html-snippets`](html-snippets) | Copy-and-paste HTML and shortcodes for every piece of the site | Elementor *HTML* widgets or WordPress *Custom HTML* blocks |
 | [`node-site`](node-site) | The original stand-alone website (Node.js) | Hosting without WordPress (Render, Railway, a VPS…) |
+| [`mobile-app`](mobile-app) | The **App Store / Google Play** app (Capacitor) | Publishing TicketJunkies as a phone app (see its README) |
 | [`tools`](tools) | Build scripts that turn the Node site's pages into the plugin | Developers only |
 
 ## Put it on WordPress (the short version)
@@ -37,6 +38,7 @@ The plugin checks this repository's **Releases** for new versions. When a newer 
 - Attendee dashboard, organizer dashboard with check-in, and an Admin Panel (users, organizers, venues, events, orders, reports, emails and texts, sandbox, settings)
 - Reports with PDF, Word, Excel and CSV downloads
 - Light, dark and automatic themes; works on phones, tablets and computers
+- **Mobile apps:** installable app with offline tickets, the **TJ Scanner** door check-in app (works on iPhone and Android), and App Store / Google Play builds in [`mobile-app`](mobile-app)
 - **Fast:** compressed files, browser caching, lazy-loaded images, automatic flyer resizing, scripts that don't block the page
 - **Social media ready:** link previews for Facebook, WhatsApp, Instagram, X, LinkedIn and iMessage, share buttons on every event, and Google "Event" rich results
 - **Works in all modern browsers:** Chrome, Safari (Mac, iPhone, iPad), Firefox, Edge and Samsung Internet, with fallbacks for older Safari

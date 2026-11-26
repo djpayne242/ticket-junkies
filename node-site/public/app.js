@@ -373,6 +373,7 @@ document.addEventListener('click', async (e) => {
 
 // ---------- nav ----------
 function renderNav() {
+  renderAppTabs();
   const h = location.hash || '#/';
   const link = (href, label) => `<a href="${href}" class="${h.startsWith(href) && href !== '#/' ? 'active' : ''}">${label}</a>`;
   let html = link('#/', 'Browse Events');
@@ -380,7 +381,7 @@ function renderNav() {
     html += link('#/register?role=organizer', 'Sell Tickets') + link('#/login', 'Log In') + `<a href="#/register" class="btn btn-primary btn-sm" style="color:#fff">Sign Up</a>`;
   } else {
     if (me.role === 'admin') html += `<a href="#/admin" class="btn btn-blue btn-sm admin-link" style="color:#fff">⚙ Admin Panel</a>`;
-    if (me.role === 'organizer' || me.role === 'admin') html += link('#/dashboard', 'My Events') + `<a href="#/create" class="btn btn-primary btn-sm" style="color:#fff">+ Create Event</a>`;
+    if (me.role === 'organizer' || me.role === 'admin') html += link('#/dashboard', 'My Events') + link('#/scan', '📷 Scan') + `<a href="#/create" class="btn btn-primary btn-sm" style="color:#fff">+ Create Event</a>`;
     if (me.role === 'organizer' || me.role === 'admin') { const rh = me.role === 'admin' ? '#/admin/reports' : '#/reports'; html += `<a href="${rh}" class="${h.startsWith(rh) ? 'active' : ''}">📈 Reports</a>`; }
     html += link('#/tickets', me.role === 'user' ? '🎟️ My Dashboard' : 'My Tickets');
     html += `<span class="who">${esc(me.name)}<span class="role-pill ${me.role}">${ROLE_LABEL[me.role]}</span></span>`;
@@ -389,7 +390,7 @@ function renderNav() {
   $nav.innerHTML = html;
   const lo = document.getElementById('logoutBtn');
   // Everyone (admin, organizer, attendee) goes to the home page after logging out
-  if (lo) lo.onclick = async () => { try { await api('/api/auth/logout', { method: 'POST' }); } catch {} me = null; toast('Logged out'); renderNav(); go('#/'); };
+  if (lo) lo.onclick = async () => { try { await api('/api/auth/logout', { method: 'POST' }); } catch {} me = null; clearAppData(); toast('Logged out'); renderNav(); go('#/'); };
 }
 document.getElementById('menuBtn').onclick = () => $nav.classList.toggle('open');
 
@@ -480,6 +481,8 @@ async function routePage() {
   window.scrollTo(0, 0);
   const { parts, params } = parseHash();
   const [a, b, c] = parts;
+  setAppManifest(a === 'scan');
+  if (a === 'scan' || a === 'app') hideAppBanner();
   try {
     if (!a) return await pageHome(params);
     if (a === 'event' && b) return await pageEvent(b);
@@ -498,6 +501,8 @@ async function routePage() {
     if (a === 'create') return needLogin('organizer') || pageEventForm(null);
     if (a === 'edit' && b) return needLogin('organizer') || (await pageEventForm(b));
     if (a === 'attendees' && b) return needLogin('organizer') || (await pageAttendees(b));
+    if (a === 'scan') return needLogin('organizer') || (await pageScan(b));
+    if (a === 'app') return pageApp();
     if (a === 'admin') return needLogin('admin') || (await pageAdmin(b || 'overview', c, params));
     $app.innerHTML = `<div class="empty"><div class="big">🎟️</div><h2>Page not found</h2><a class="btn btn-primary" href="#/">Go home</a></div>`;
   } catch (e) {
@@ -884,6 +889,7 @@ function cartLoad() {
 function cartSave(c) {
   try { if (Object.keys(c).length) localStorage.setItem(CART_KEY, JSON.stringify(c)); else localStorage.removeItem(CART_KEY); } catch {}
   updateCartBadge();
+  if (IS_NATIVE) renderAppTabs();
 }
 const cartOnly = (id) => { const e = cartLoad()[id]; return e ? { [id]: e } : {}; };
 const cartCount = (c = cartLoad()) => Object.values(c).reduce((a, e) => a + Object.values(e.qty || {}).reduce((x, y) => x + (Number(y) || 0), 0), 0);
@@ -1461,6 +1467,7 @@ async function pageTickets() {
       </tr>`).join('')}
     </tbody></table></div>` : ''}`;
   bindOrderActions();
+  warmTicketsOffline();
 }
 
 async function pageDashboard() {
@@ -1948,7 +1955,7 @@ async function pageAttendees(id) {
   const s = ev.stats;
   $app.innerHTML = `
     <div class="section-head"><div><a href="${me.role === 'admin' ? '#/admin/events' : '#/dashboard'}" class="small">← ${me.role === 'admin' ? 'Admin · Events' : 'Dashboard'}</a><h1>${esc(ev.title)}</h1><div class="muted">${esc(fmtLong(ev.startsAt))} · ${esc(ev.venue)}</div></div>
-      <button class="btn btn-ghost" id="csvBtn" ${attendees.length ? '' : 'disabled'}>⬇ Export CSV</button></div>
+      <div class="actions"><a class="btn btn-blue" href="#/scan/${esc(ev.id)}">📷 Door scanner</a><button class="btn btn-ghost" id="csvBtn" ${attendees.length ? '' : 'disabled'}>⬇ Export CSV</button></div></div>
     <div class="stats">
       <div class="stat"><div class="muted small">Tickets sold</div><div class="num">${s.paidSold ?? s.sold} / ${s.capacity}</div>${s.comped ? `<div class="muted small">+ ${s.comped} complimentary</div>` : ''}</div>
       <div class="stat"><div class="muted small">Orders</div><div class="num">${s.orders}</div></div>
@@ -3065,34 +3072,429 @@ async function pageReports(adminBody, params) {
     r.byCard.map((c) => [c.brand, c.last4, c.fingerprint, c.holders.join('; '), c.emails.join('; '), c.orders, c.refunds, c.tickets, c.total.toFixed(2), c.events.join('; '), dt(c.first), dt(c.last), c.flags.join('; ')]));
 }
 
-// ---------- QR scanner (door check-in) ----------
+// ---------- QR scanner on the attendees page (door check-in) ----------
 let scanStream = null;
 async function startScanner(onCode) {
   const box = document.getElementById('scanner');
   const video = document.getElementById('scanVideo');
   const msg = document.getElementById('scanMsg');
   if (scanStream) { scanStream.getTracks().forEach((t) => t.stop()); scanStream = null; box.classList.add('hidden'); return; }
-  if (!('BarcodeDetector' in window)) { toast('QR scanning is not supported in this browser — use Chrome/Edge/Android, or type the code', true); return; }
-  try {
-    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-  } catch { toast('Camera permission was denied', true); return; }
+  let read;
+  try { [scanStream, read] = await Promise.all([openCamera('environment'), makeQrReader()]); }
+  catch (e) { if (scanStream) scanStream.getTracks().forEach((t) => t.stop()); scanStream = null; toast(e.message, true); return; }
+  const stream = scanStream;
   box.classList.remove('hidden');
-  video.srcObject = scanStream; await video.play();
-  const detector = new BarcodeDetector({ formats: ['qr_code'] });
+  video.srcObject = stream; await video.play().catch(() => {});
   let last = '', lastAt = 0;
   const tick = async () => {
-    if (!scanStream) return;
+    if (scanStream !== stream) return;
     try {
-      const codes = await detector.detect(video);
-      const raw = codes[0]?.rawValue?.trim().toUpperCase();
-      const m = raw && raw.match(/TJ-[0-9A-F]{8}/);
-      if (m && (m[0] !== last || Date.now() - lastAt > 4000)) { last = m[0]; lastAt = Date.now(); msg.textContent = 'Scanned ' + m[0]; onCode(m[0]); }
+      const code = video.readyState >= 2 ? ticketCodeIn(await read(video)) : '';
+      if (code && (code !== last || Date.now() - lastAt > 4000)) { last = code; lastAt = Date.now(); msg.textContent = 'Scanned ' + code; onCode(code); }
     } catch {}
-    setTimeout(tick, 300);
+    setTimeout(tick, 250);
   };
   tick();
 }
 window.addEventListener('hashchange', () => { if (scanStream) { scanStream.getTracks().forEach((t) => t.stop()); scanStream = null; } });
+
+// ---------- mobile app: install (PWA), offline tickets, native app shell ----------
+const APP_URLS = { sw: '/sw.js', swScope: '/', manifest: '/manifest.webmanifest', scannerManifest: '/scanner.webmanifest', jsqr: '/vendor/jsQR.js?v=1.4.0', appleIcon: '/apple-touch-icon.png', scannerIcon: '/scanner-touch.png', icon: '/icon-192.png', scannerIconBig: '/scanner-192.png' };
+// The App Store / Google Play app adds "TicketJunkiesApp" to its browser name, so the site knows it is inside the app.
+const IS_NATIVE = /TicketJunkiesApp/.test(navigator.userAgent) || !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const isStandalone = () => IS_NATIVE || (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+if (IS_NATIVE) document.documentElement.setAttribute('data-tj-app', 'native');
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; setTimeout(maybeAppBanner, 1500); });
+window.addEventListener('appinstalled', () => { installEvt = null; hideAppBanner(); toast('🎉 App installed — find it on your home screen'); });
+window.addEventListener('offline', () => toast('📶 You\'re offline — your saved tickets still open', true));
+window.addEventListener('online', () => toast('✓ Back online'));
+
+// Points "Add to Home Screen" / "Install" at the right app: TicketJunkies, or TJ Scanner on the door-scanner screen.
+function setAppManifest(scanner) {
+  const head = document.head;
+  const tag = (sel, make) => head.querySelector(sel) || head.appendChild(make());
+  const link = tag('link[rel="manifest"]', () => Object.assign(document.createElement('link'), { rel: 'manifest' }));
+  const href = scanner ? APP_URLS.scannerManifest : APP_URLS.manifest;
+  if (link.getAttribute('href') !== href) link.setAttribute('href', href);
+  const title = tag('meta[name="apple-mobile-web-app-title"]', () => Object.assign(document.createElement('meta'), { name: 'apple-mobile-web-app-title' }));
+  title.setAttribute('content', scanner ? 'TJ Scanner' : 'TicketJunkies');
+  const cap = tag('meta[name="apple-mobile-web-app-capable"]', () => Object.assign(document.createElement('meta'), { name: 'apple-mobile-web-app-capable' }));
+  cap.setAttribute('content', 'yes');
+  const icon = tag('link[rel="apple-touch-icon"]', () => Object.assign(document.createElement('link'), { rel: 'apple-touch-icon' }));
+  if (!icon.dataset.tjOrig) icon.dataset.tjOrig = icon.getAttribute('href') || APP_URLS.appleIcon;
+  const iconHref = scanner ? APP_URLS.scannerIcon : icon.dataset.tjOrig;
+  if (icon.getAttribute('href') !== iconHref) icon.setAttribute('href', iconHref);
+}
+
+function registerAppWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  if (window.TJ_CONFIG && window.TJ_CONFIG.editor) return;
+  const reg = () => navigator.serviceWorker.register(APP_URLS.sw, { scope: APP_URLS.swScope }).catch(() => {});
+  if (document.readyState === 'complete') reg(); else window.addEventListener('load', reg);
+}
+// Saved tickets and pages are removed from this device when someone logs out.
+function clearAppData() {
+  try { if (window.caches) caches.keys().then((ks) => ks.filter((k) => /^tj-(data|pages)/.test(k)).forEach((k) => caches.delete(k))); } catch {}
+}
+// Loads every ticket QR code once, so the tickets still open with no signal at the door.
+function warmTicketsOffline() {
+  if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) return;
+  const urls = new Set([...$app.querySelectorAll('img.stub-qr, .big-ticket img')].map((i) => i.getAttribute('src')).filter(Boolean));
+  urls.forEach((u) => fetch(u, { credentials: 'same-origin' }).catch(() => {}));
+}
+
+function installHelpHtml(kind) {
+  const name = kind === 'scanner' ? 'TJ Scanner' : 'TicketJunkies';
+  if (isStandalone()) return `<p>✅ You're already using the ${esc(name)} app.</p>`;
+  if (IS_IOS) return `<ol class="install-steps">
+      <li>Open this page in <strong>Safari</strong>${kind === 'scanner' ? ' (stay on the scanner screen)' : ''}.</li>
+      <li>Tap the <strong>Share</strong> button <span class="ios-share" aria-hidden="true">⬆︎</span> at the bottom (or top) of the screen.</li>
+      <li>Scroll down and tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li>
+    </ol><p class="muted small">The ${esc(name)} icon appears on your home screen and opens full-screen like any app.</p>`;
+  if (IS_ANDROID) return `<ol class="install-steps">
+      <li>Open this page in <strong>Chrome</strong>${kind === 'scanner' ? ' (stay on the scanner screen)' : ''}.</li>
+      <li>Tap the <strong>⋮ menu</strong> in the top corner.</li>
+      <li>Tap <strong>Install app</strong> (or <strong>Add to Home screen</strong>), then <strong>Install</strong>.</li>
+    </ol>`;
+  return `<ol class="install-steps">
+      <li>In Chrome or Edge, click the <strong>install icon</strong> <span aria-hidden="true">⊕</span> at the right end of the address bar.</li>
+      <li>Click <strong>Install</strong>.</li>
+    </ol><p class="muted small">On a phone? Open this page on your phone to add it to your home screen.</p>`;
+}
+function openInstallHelp(kind) {
+  document.getElementById('installModal')?.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'installModal'; wrap.className = 'modal-backdrop';
+  wrap.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="Install the app">
+    <div class="modal-head"><h3>📲 Install ${kind === 'scanner' ? 'TJ Scanner' : 'the TicketJunkies app'}</h3><button class="modal-x" aria-label="Close">×</button></div>
+    ${installHelpHtml(kind)}
+    <div style="text-align:right;margin-top:10px"><button class="btn btn-primary btn-sm" data-close>Got it</button></div></div>`;
+  const close = () => wrap.remove();
+  wrap.addEventListener('click', (e) => { if (e.target === wrap || e.target.closest('.modal-x,[data-close]')) close(); });
+  document.body.appendChild(wrap);
+}
+async function installApp(kind = 'main') {
+  setAppManifest(kind === 'scanner');
+  if (installEvt && !isStandalone()) {
+    const e = installEvt; installEvt = null;
+    try { e.prompt(); const r = await e.userChoice; if (r && r.outcome === 'accepted') { hideAppBanner(); return; } } catch {}
+    return;
+  }
+  openInstallHelp(kind);
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-install]');
+  if (b) { e.preventDefault(); installApp(b.dataset.install || 'main'); }
+});
+
+// Small "Get the app" bar for phone visitors (not inside the app, not on the scanner/admin screens, easy to dismiss)
+function hideAppBanner() { document.getElementById('appBannerHost')?.remove(); }
+function maybeAppBanner() {
+  if (isStandalone() || document.getElementById('appBannerHost')) return;
+  if (!IS_IOS && !IS_ANDROID && !installEvt) return;
+  if (!installEvt && !IS_IOS) return;
+  try { if (Number(localStorage.getItem('tj_app_banner_hide') || 0) > Date.now()) return; } catch {}
+  if (/^#\/(scan|admin|checkout|cart|app)/.test(location.hash || '')) return;
+  const host = document.createElement('div'); host.id = 'appBannerHost'; host.className = 'tj-root';
+  host.innerHTML = `<div class="app-banner" role="region" aria-label="Get the app">
+    <img src="${esc(APP_URLS.icon)}" alt="" width="44" height="44" />
+    <div class="app-banner-text"><strong>Get the TicketJunkies app</strong><span>Your tickets on your home screen — even offline</span></div>
+    <button class="btn btn-primary btn-sm" data-install="main">Install</button>
+    <button class="app-banner-x" aria-label="Not now">×</button></div>`;
+  host.querySelector('.app-banner-x').onclick = () => { try { localStorage.setItem('tj_app_banner_hide', String(Date.now() + 14 * 86400000)); } catch {} hideAppBanner(); };
+  document.body.appendChild(host);
+}
+
+// ---------- "Get the app" page ----------
+function pageApp() {
+  const inApp = isStandalone();
+  const canScan = me && (me.role === 'organizer' || me.role === 'admin');
+  $app.innerHTML = `
+    <div class="app-hero">
+      <img src="${esc(APP_URLS.icon)}" alt="" width="84" height="84" />
+      <h1 class="display">Take TicketJunkies with you</h1>
+      <p class="muted">Install the app on your phone: one tap to open, your tickets ready at the door — even with no signal.</p>
+    </div>
+    <div class="app-cards">
+      <div class="panel app-card">
+        <div class="app-card-head"><img src="${esc(APP_URLS.icon)}" alt="" width="56" height="56" /><div><h2>TicketJunkies</h2><div class="muted small">For everyone · iPhone, Android & computer</div></div></div>
+        <ul class="app-feats">
+          <li>🎟️ All your tickets and QR codes in one place</li>
+          <li>📶 Tickets open offline — no signal needed at the door</li>
+          <li>⚡ Opens instantly, full-screen, from your home screen</li>
+          <li>🛒 Browse events and check out in a few taps</li>
+        </ul>
+        ${inApp ? '<div class="notice">✅ You\'re using the app right now.</div>' : '<button class="btn btn-primary" data-install="main">📲 Install the app</button>'}
+      </div>
+      <div class="panel app-card">
+        <div class="app-card-head"><img src="${esc(APP_URLS.scannerIconBig)}" alt="" width="56" height="56" style="border-radius:12px" /><div><h2>TJ Scanner</h2><div class="muted small">For promoters & door staff</div></div></div>
+        <ul class="app-feats">
+          <li>📷 Scan ticket QR codes with the phone camera</li>
+          <li>✅ Instant green / red result with sound and vibration</li>
+          <li>🚫 Stops duplicate entry — each ticket scans once</li>
+          <li>📊 Live checked-in count for your event</li>
+        </ul>
+        ${canScan ? '<a class="btn btn-blue" href="#/scan">📷 Open the scanner</a>' : me ? '<p class="muted small">The scanner is for organizer accounts. <a href="#/register?role=organizer">Become an organizer</a></p>' : '<a class="btn btn-blue" href="#/login?next=%23%2Fscan">Log in to open the scanner</a>'}
+        <p class="muted small" style="margin-top:10px">Tip: open the scanner, then install it from there — it gets its own home-screen icon.</p>
+      </div>
+    </div>`;
+}
+
+// ---------- QR reading (built-in detector on Android/Chrome, small JS reader on iPhone/Safari) ----------
+let jsQRLoading = null;
+function loadJsQR() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  return (jsQRLoading ||= new Promise((ok, no) => {
+    const s = document.createElement('script');
+    s.src = APP_URLS.jsqr; s.async = true;
+    // Some WordPress themes load an AMD module loader; hide it for a moment so the reader attaches to window.
+    const amd = typeof window.define === 'function' && window.define.amd ? window.define : null;
+    if (amd) window.define = undefined;
+    const done = () => { if (amd) window.define = amd; };
+    s.onload = () => { done(); window.jsQR ? ok(window.jsQR) : no(new Error('The QR reader did not load')); };
+    s.onerror = () => { done(); jsQRLoading = null; no(new Error('The QR reader did not load — check your connection')); };
+    document.head.appendChild(s);
+  }));
+}
+async function makeQrReader() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const fmts = await BarcodeDetector.getSupportedFormats();
+      if (fmts.includes('qr_code')) { const d = new BarcodeDetector({ formats: ['qr_code'] }); return async (video) => { const c = await d.detect(video); return (c[0] && c[0].rawValue) || ''; }; }
+    } catch {}
+  }
+  const jsQR = await loadJsQR();
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  let flip = false;
+  return async (video) => {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return '';
+    const s = Math.min(1, 640 / Math.max(vw, vh));
+    const w = Math.round(vw * s), h = Math.round(vh * s);
+    canvas.width = w; canvas.height = h;
+    ctx.drawImage(video, 0, 0, w, h);
+    flip = !flip; // alternate normal / inverted (white-on-black) codes between frames to stay fast
+    const r = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: flip ? 'dontInvert' : 'onlyInvert' });
+    return r ? r.data : '';
+  };
+}
+const ticketCodeIn = (raw) => { const m = String(raw || '').trim().toUpperCase().match(/TJ-[0-9A-F]{8}/); return m ? m[0] : ''; };
+async function openCamera(facing = 'environment') {
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('The camera needs a secure (https) connection');
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+  } catch (e) {
+    if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) throw new Error('Camera permission was denied — allow the camera in your browser/app settings, then try again');
+    if (e && e.name === 'NotFoundError') throw new Error('No camera was found on this device');
+    throw new Error('Could not start the camera');
+  }
+}
+
+
+// ---------- store app (App Store / Google Play): bottom tab bar like a native app ----------
+const TAB_ICONS = {
+  events: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg>',
+  tickets: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5V6a1.5 1.5 0 0 1 1.5-1.5h15A1.5 1.5 0 0 1 21 6v2.5a3.5 3.5 0 0 0 0 7V18a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18v-2.5a3.5 3.5 0 0 0 0-7z"/><path d="M14.5 4.5v15" stroke-dasharray="2 2.5"/></svg>',
+  scan: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M3 12h18"/></svg>',
+  cart: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2.5 3.5h3l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h8.4a1.5 1.5 0 0 0 1.5-1.1L21 8H6.3"/></svg>',
+  menu: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/></svg>',
+};
+function renderAppTabs() {
+  if (!IS_NATIVE) return;
+  let host = document.getElementById('appTabsHost');
+  if (!host) {
+    host = document.createElement('div'); host.id = 'appTabsHost'; host.className = 'tj-root';
+    document.body.appendChild(host);
+    host.addEventListener('click', (e) => {
+      const m = e.target.closest('[data-tab-menu]');
+      if (m) { e.preventDefault(); if (!me) return go('#/login'); $nav.classList.toggle('open'); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+      if (e.target.closest('a')) $nav.classList.remove('open');
+    });
+  }
+  const seg = parseHash().parts[0] || '';
+  const organizer = me && (me.role === 'organizer' || me.role === 'admin');
+  const items = [
+    ['events', '#/', 'Events', seg === '' || seg === 'event'],
+    ['tickets', me ? '#/tickets' : '#/login?next=%23%2Ftickets', 'Tickets', seg === 'tickets' || seg === 'order' || seg === 't'],
+    organizer ? ['scan', '#/scan', 'Scan', seg === 'scan'] : ['cart', '#/cart', 'Cart', seg === 'cart' || seg === 'checkout'],
+    ['menu', '#', me ? 'Account' : 'Log in', ['login', 'register', 'dashboard', 'create', 'edit', 'attendees', 'reports', 'admin'].includes(seg)],
+  ];
+  const n = cartCount();
+  host.innerHTML = '<div class="app-tabs-space" aria-hidden="true"></div><nav class="app-tabs" aria-label="App sections">' + items.map(([k, href, label, on]) =>
+    `<a href="${href}" class="app-tab${on ? ' on' : ''}" ${k === 'menu' ? 'data-tab-menu' : ''} ${on ? 'aria-current="page"' : ''}>${TAB_ICONS[k]}${k === 'cart' && n ? `<b class="app-tab-badge">${n}</b>` : ''}<span>${label}</span></a>`).join('') + '</nav>';
+}
+window.addEventListener('storage', (e) => { if (e.key === CART_KEY) renderAppTabs(); });
+
+// ---------- door scanner (TJ Scanner) ----------
+let scanSession = null;
+function stopScanSession() {
+  if (!scanSession) return;
+  scanSession.stop = true;
+  if (scanSession.stream) scanSession.stream.getTracks().forEach((t) => t.stop());
+  if (scanSession.lock) scanSession.lock.release().catch(() => {});
+  scanSession = null;
+}
+window.addEventListener('hashchange', stopScanSession);
+// Phone locked or app switched: turn the camera off; one tap resumes.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden || !scanSession) return;
+  stopScanSession();
+  const idle = document.getElementById('scanIdle'), b = document.getElementById('scanStart');
+  if (idle) idle.classList.remove('hidden');
+  if (b) { b.disabled = false; b.textContent = '📷 Resume scanning'; }
+});
+
+function scanFeedback(kind, soundOn) {
+  try { if (navigator.vibrate) navigator.vibrate(kind === 'ok' ? 90 : [220, 90, 220]); } catch {}
+  if (!soundOn || !scanSession || !scanSession.audio) return;
+  try {
+    const ac = scanSession.audio, t = ac.currentTime;
+    const tone = (f, at, len) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t + at); g.gain.exponentialRampToValueAtTime(0.35, t + at + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + at + len); o.connect(g).connect(ac.destination); o.start(t + at); o.stop(t + at + len + 0.02); };
+    if (kind === 'ok') { tone(880, 0, 0.12); tone(1320, 0.12, 0.16); } else { tone(220, 0, 0.22); tone(180, 0.26, 0.3); }
+  } catch {}
+}
+
+async function pageScan(eventId) {
+  loading();
+  setAppManifest(true);
+  const { events } = await api('/api/organizer/events');
+  let last = ''; try { last = localStorage.getItem('tj_scan_event') || ''; } catch {}
+  if (!eventId) {
+    const now = Date.now();
+    const live = events.filter((e) => e.status !== 'cancelled');
+    const soon = live.filter((e) => new Date(e.endsAt || e.startsAt).getTime() > now - 6 * 3600000).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    const past = live.filter((e) => !soon.includes(e)).sort((a, b) => b.startsAt.localeCompare(a.startsAt)).slice(0, 10);
+    const card = (e) => `<a class="scan-pick${e.id === last ? ' last' : ''}" href="#/scan/${esc(e.id)}">
+        <div><strong>${esc(e.title)}</strong><div class="muted small">${esc(fmtShort(e.startsAt))}${e.venue ? ' · ' + esc(e.venue) : ''}</div>${e.status === 'draft' ? '<span class="badge draft">draft</span>' : ''}</div>
+        <div class="scan-pick-num"><b>${e.stats.checkedIn}</b><span>/ ${e.stats.sold} in</span></div></a>`;
+    $app.innerHTML = `
+      <div class="scan-app">
+        <div class="section-head"><div><h1>📷 TJ Scanner</h1><div class="muted">Choose the event you're checking guests into.</div></div>${isStandalone() ? '' : '<button class="btn btn-ghost btn-sm" data-install="scanner">📲 Install scanner app</button>'}</div>
+        ${soon.length ? `<h3 class="scan-h">Today & upcoming</h3><div class="scan-picks">${soon.map(card).join('')}</div>` : ''}
+        ${past.length ? `<h3 class="scan-h">Past events</h3><div class="scan-picks">${past.map(card).join('')}</div>` : ''}
+        ${!live.length ? '<div class="empty"><div class="big">🎟️</div><h2>No events yet</h2><p class="muted">Create an event, sell tickets, then scan guests in here.</p><a class="btn btn-primary" href="#/create">+ Create Event</a></div>' : ''}
+      </div>`;
+    return;
+  }
+  const ev = events.find((e) => e.id === eventId);
+  if (!ev) { $app.innerHTML = '<div class="empty"><div class="big">🔒</div><h2>Event not found</h2><p class="muted">You can only scan tickets for your own events.</p><a class="btn btn-primary" href="#/scan">Choose an event</a></div>'; return; }
+  try { localStorage.setItem('tj_scan_event', ev.id); } catch {}
+  let soundOn = true; try { soundOn = localStorage.getItem('tj_scan_sound') !== 'off'; } catch {}
+  // Count every valid ticket on the guest list (paid, complimentary and test tickets)
+  let checkedIn = ev.stats.checkedIn, total = ev.stats.sold;
+  try { const g = await api('/api/organizer/events/' + encodeURIComponent(ev.id) + '/attendees'); total = g.attendees.length; checkedIn = g.attendees.filter((x) => x.checkedIn).length; } catch {}
+  $app.innerHTML = `
+    <div class="scan-app scanning">
+      <div class="scan-top">
+        <a href="#/scan" class="scan-back" aria-label="Choose another event">←</a>
+        <div class="scan-title"><strong>${esc(ev.title)}</strong><div class="muted small">${esc(fmtShort(ev.startsAt))}${ev.venue ? ' · ' + esc(ev.venue) : ''}</div></div>
+        <div class="scan-count" aria-live="polite"><b id="scIn">${checkedIn}</b><span>/ <span id="scTot">${total}</span> in</span></div>
+      </div>
+      <div class="scan-stage">
+        <video id="scanVideo" playsinline muted autoplay></video>
+        <div class="scan-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <div class="scan-idle" id="scanIdle"><button class="btn btn-primary" id="scanStart">📷 Start scanning</button><p class="small">Allow camera access when your phone asks.</p></div>
+      </div>
+      <div class="scan-result idle" id="scanResult" aria-live="assertive"><div class="sr-icon">🎟️</div><div><div class="sr-title">Ready to scan</div><div class="sr-sub">Point the camera at a ticket QR code</div></div></div>
+      <form id="scanManual" class="scan-manual" autocomplete="off">
+        <input name="code" placeholder="Or type a ticket code, e.g. TJ-1A2B3C4D" autocapitalize="characters" spellcheck="false" />
+        <button class="btn btn-green">Check in</button>
+      </form>
+      <div class="scan-tools">
+        <button type="button" class="btn btn-ghost btn-sm" id="scanSound">${soundOn ? '🔊 Sound on' : '🔇 Sound off'}</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="scanFlip">🔄 Switch camera</button>
+        <a class="btn btn-ghost btn-sm" href="#/attendees/${esc(ev.id)}">👥 Guest list</a>
+        ${isStandalone() ? '' : '<button type="button" class="btn btn-ghost btn-sm" data-install="scanner">📲 Install scanner app</button>'}
+      </div>
+      <h3 class="scan-h">Recent scans</h3>
+      <ul class="scan-log" id="scanLog"><li class="muted small">Scans from this phone show up here.</li></ul>
+    </div>`;
+  const $res = document.getElementById('scanResult');
+  const $log = document.getElementById('scanLog');
+  let facing = 'environment', busy = false, lastCode = '', lastAt = 0, resetTimer = 0, logged = 0;
+  const show = (kind, title, sub) => {
+    $res.className = 'scan-result ' + kind;
+    $res.innerHTML = `<div class="sr-icon">${kind === 'ok' ? '✓' : kind === 'warn' ? '!' : kind === 'bad' ? '✕' : '🎟️'}</div><div><div class="sr-title">${esc(title)}</div><div class="sr-sub">${esc(sub || '')}</div></div>`;
+    clearTimeout(resetTimer);
+    if (kind !== 'idle') resetTimer = setTimeout(() => show('idle', 'Ready for the next guest', 'Point the camera at a ticket QR code'), kind === 'ok' ? 2600 : 4200);
+  };
+  const addLog = (kind, code, text) => {
+    if (!logged++) $log.innerHTML = '';
+    const li = document.createElement('li'); li.className = 'sl-' + kind;
+    li.innerHTML = `<span class="sl-dot"></span><span class="code">${esc(code)}</span><span class="sl-text">${esc(text)}</span><span class="muted small">${esc(fmtTime(new Date().toISOString()))}</span>`;
+    $log.prepend(li);
+    while ($log.children.length > 25) $log.lastChild.remove();
+  };
+  const checkin = async (code) => {
+    if (busy) return;
+    busy = true;
+    show('idle', 'Checking ' + code + '…', 'One moment');
+    try {
+      const r = await api('/api/organizer/checkin', { method: 'POST', body: { code, eventId: ev.id } });
+      checkedIn++; document.getElementById('scIn').textContent = checkedIn;
+      show('ok', 'Admit ' + r.ticket.buyerName, r.ticket.tierName + ' · ' + code);
+      addLog('ok', code, r.ticket.buyerName + ' — ' + r.ticket.tierName);
+      scanFeedback('ok', soundOn);
+    } catch (e) {
+      const offline = !e.status || e.status === 503;
+      const kind = e.status === 409 && /already/i.test(e.message) ? 'warn' : 'bad';
+      const title = offline ? 'No connection' : kind === 'warn' ? 'Already checked in' : e.status === 404 ? 'Not a ticket for this event' : 'Do not admit';
+      const sub = offline ? 'This ticket was NOT checked in. Check your signal and scan again.' : e.message;
+      show(offline ? 'bad' : kind, title, sub);
+      addLog(offline ? 'bad' : kind, code, title);
+      scanFeedback('bad', soundOn);
+    } finally { busy = false; }
+  };
+  const onRaw = (raw) => {
+    const code = ticketCodeIn(raw);
+    if (!code) { if (raw && Date.now() - lastAt > 2500) { lastAt = Date.now(); show('bad', 'Not a TicketJunkies ticket', 'This QR code is not a ticket'); scanFeedback('bad', soundOn); } return; }
+    if (code === lastCode && Date.now() - lastAt < 3500) return;
+    lastCode = code; lastAt = Date.now();
+    checkin(code);
+  };
+  const start = async () => {
+    stopScanSession();
+    const sess = scanSession = { stop: false, stream: null, lock: null, audio: null };
+    try { const AC = window.AudioContext || window.webkitAudioContext; if (AC) { sess.audio = new AC(); sess.audio.resume && sess.audio.resume(); } } catch {}
+    const btn = document.getElementById('scanStart');
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting camera…'; }
+    try {
+      const [stream, read] = await Promise.all([openCamera(facing), makeQrReader()]);
+      if (sess.stop) { stream.getTracks().forEach((t) => t.stop()); return; }
+      sess.stream = stream;
+      const video = document.getElementById('scanVideo');
+      video.srcObject = stream; video.classList.toggle('mirror', facing === 'user');
+      await video.play().catch(() => {});
+      document.getElementById('scanIdle').classList.add('hidden');
+      try { if (navigator.wakeLock) sess.lock = await navigator.wakeLock.request('screen'); } catch {}
+      const tick = async () => {
+        if (sess.stop || scanSession !== sess) return;
+        if (!busy && video.readyState >= 2) { try { const raw = await read(video); if (raw) onRaw(raw); } catch {} }
+        setTimeout(tick, 160);
+      };
+      tick();
+    } catch (e) {
+      stopScanSession();
+      if (btn) { btn.disabled = false; btn.textContent = '📷 Start scanning'; }
+      show('bad', 'Camera not available', e.message + ' You can still type ticket codes below.');
+    }
+  };
+  document.getElementById('scanStart').onclick = start;
+  document.getElementById('scanFlip').onclick = () => { facing = facing === 'environment' ? 'user' : 'environment'; if (scanSession && scanSession.stream) start(); else toast(facing === 'user' ? 'Front camera selected' : 'Back camera selected'); };
+  document.getElementById('scanSound').onclick = (e) => { soundOn = !soundOn; try { localStorage.setItem('tj_scan_sound', soundOn ? 'on' : 'off'); } catch {} e.target.textContent = soundOn ? '🔊 Sound on' : '🔇 Sound off'; };
+  document.getElementById('scanManual').onsubmit = (e) => {
+    e.preventDefault();
+    const inp = e.target.elements.code; const raw = inp.value.trim();
+    if (!raw) return;
+    const code = ticketCodeIn(raw) || raw.toUpperCase();
+    inp.value = ''; lastCode = code; lastAt = Date.now();
+    checkin(code);
+  };
+}
 
 // ---------- public ticket page (link from text/email) ----------
 async function pagePublicTickets(id, key) {
@@ -3118,6 +3520,7 @@ async function pagePublicTickets(id, key) {
         <div class="code">${esc(t.code)}</div>
         ${t.checkedIn ? '<div class="checked">✓ Already checked in</div>' : ''}
       </div>`).join('')}</div>`;
+  warmTicketsOffline();
 }
 
 // ---------- boot ----------
@@ -3126,6 +3529,8 @@ async function pagePublicTickets(id, key) {
   try { META = await api('/api/meta'); } catch {}
   try { me = (await api('/api/auth/me')).user; } catch {}
   route();
+  registerAppWorker();
+  setTimeout(maybeAppBanner, 4000);
 })();
 
 // ---------- mobile: label table cells so tables become cards on phones ----------

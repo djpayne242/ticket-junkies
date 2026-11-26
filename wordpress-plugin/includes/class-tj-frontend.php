@@ -20,7 +20,7 @@ function tj_page_url($key) {
 function tj_route_url($hash) {
   $hash = '#/' . ltrim(preg_replace('~^#?/?~', '', (string) $hash), '/');
   $seg = preg_split('~[/?]~', substr($hash, 2))[0];
-  $map = ['' => 'home', 'event' => 'event', 'checkout' => 'checkout', 'order' => 'checkout', 'tickets' => 'tickets', 'dashboard' => 'organizer', 'create' => 'organizer', 'edit' => 'organizer', 'attendees' => 'organizer', 'reports' => 'organizer', 'admin' => 'admin', 'login' => 'login', 'register' => 'register', 't' => 'ticket'];
+  $map = ['' => 'home', 'event' => 'event', 'checkout' => 'checkout', 'order' => 'checkout', 'tickets' => 'tickets', 'dashboard' => 'organizer', 'create' => 'organizer', 'edit' => 'organizer', 'attendees' => 'organizer', 'reports' => 'organizer', 'admin' => 'admin', 'login' => 'login', 'register' => 'register', 't' => 'ticket', 'scan' => 'organizer', 'app' => 'tickets'];
   $key = isset($map[$seg]) ? $map[$seg] : 'home';
   $base = tj_page_url($key);
   if ($key === 'home') { $q = strpos($hash, '?') !== false ? substr($hash, strpos($hash, '?') + 1) : ''; return $base . ($q ? (strpos($base, '?') !== false ? '&' : '?') . $q : ''); }
@@ -41,6 +41,7 @@ final class TJ_Frontend {
   public static function init() {
     add_action('wp_enqueue_scripts', [__CLASS__, 'assets']);
     add_action('wp_head', [__CLASS__, 'head'], 1);
+    add_action('wp_loaded', [__CLASS__, 'app_endpoints'], 1);
     add_filter('wp_resource_hints', function ($urls, $rel) { if ($rel === 'preconnect') { $urls[] = 'https://fonts.googleapis.com'; $urls[] = ['href' => 'https://fonts.gstatic.com', 'crossorigin' => 'anonymous']; } return $urls; }, 10, 2);
     add_filter('body_class', function ($c) { $c[] = 'tj-page'; return $c; });
     self::hardening();
@@ -121,6 +122,72 @@ final class TJ_Frontend {
     add_action('wp_footer', function () { if (apply_filters('tj_speed_embed', true)) wp_dequeue_script('wp-embed'); });
   }
 
+  // ------------------------------------------------------------------ mobile app (install + offline)
+  /** Path of the site address, e.g. "/" or "/blog/" — keeps app links on the same address the visitor is using */
+  public static function home_path() {
+    $p = wp_parse_url(home_url('/'), PHP_URL_PATH);
+    return $p ? trailingslashit($p) : '/';
+  }
+  /** Install details for the phone: the TicketJunkies app, or TJ Scanner for promoters */
+  public static function manifest($kind) {
+    $path = self::home_path();
+    $img = TJ_URL . 'assets/img/';
+    $scan_start = wp_make_link_relative(add_query_arg('app', 'scanner', tj_page_url('organizer'))) . '#/scan';
+    if ($kind === 'scanner') {
+      return [
+        'id' => $path . '?app=scanner', 'name' => 'TJ Scanner – door check-in', 'short_name' => 'TJ Scanner',
+        'description' => 'Scan TicketJunkies ticket QR codes at the door.',
+        'start_url' => $scan_start, 'scope' => $path, 'display' => 'standalone', 'orientation' => 'portrait',
+        'background_color' => '#12161f', 'theme_color' => '#12161f',
+        'icons' => [
+          ['src' => $img . 'scanner-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any maskable'],
+          ['src' => $img . 'scanner-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any maskable'],
+        ],
+      ];
+    }
+    $name = wp_strip_all_tags(get_bloginfo('name'));
+    return [
+      'id' => $path, 'name' => $name !== '' ? $name : 'TicketJunkies', 'short_name' => apply_filters('tj_app_short_name', 'TicketJunkies'),
+      'description' => 'Discover events and buy tickets. Your tickets open even offline.',
+      'start_url' => $path . '?source=app', 'scope' => $path, 'display' => 'standalone', 'orientation' => 'portrait',
+      'background_color' => '#ffffff', 'theme_color' => '#376eb8', 'categories' => ['entertainment', 'events', 'lifestyle'],
+      'icons' => [
+        ['src' => $img . 'icon-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
+        ['src' => $img . 'icon-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],
+        ['src' => $img . 'icon-maskable-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable'],
+      ],
+      'shortcuts' => [
+        ['name' => 'My tickets', 'url' => wp_make_link_relative(tj_route_url('#/tickets')), 'icons' => [['src' => $img . 'icon-192.png', 'sizes' => '192x192']]],
+        ['name' => 'Scan tickets (promoters)', 'url' => $scan_start, 'icons' => [['src' => $img . 'scanner-192.png', 'sizes' => '192x192']]],
+      ],
+    ];
+  }
+  /** /?tj_sw=1 is the offline worker, /?tj_manifest=main|scanner the install details (turn off with add_filter('tj_pwa', '__return_false')) */
+  public static function app_endpoints() {
+    if (!isset($_GET['tj_sw']) && !isset($_GET['tj_manifest'])) return;
+    if (is_admin() || !apply_filters('tj_pwa', true)) return;
+    if (isset($_GET['tj_sw'])) {
+      $file = TJ_DIR . 'assets/sw.js';
+      $js = is_readable($file) ? file_get_contents($file) : false;
+      if ($js === false) { status_header(404); exit; }
+      $js = str_replace("const VERSION = '1.3.0';", "const VERSION = '" . TJ_VERSION . '-' . filemtime($file) . "';", $js);
+      status_header(200);
+      nocache_headers();
+      header('Content-Type: application/javascript; charset=utf-8');
+      header('Service-Worker-Allowed: ' . self::home_path());
+      header('X-Content-Type-Options: nosniff');
+      echo $js;
+      exit;
+    }
+    $kind = sanitize_key(wp_unslash($_GET['tj_manifest'])) === 'scanner' ? 'scanner' : 'main';
+    status_header(200);
+    header('Content-Type: application/manifest+json; charset=utf-8');
+    header('Cache-Control: public, max-age=3600');
+    header('X-Content-Type-Options: nosniff');
+    echo wp_json_encode(self::manifest($kind), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+  }
+
   /** Theme is applied before paint so dark mode never flashes white */
   public static function head() {
     echo "<meta name=\"color-scheme\" content=\"light dark\" />\n";
@@ -128,6 +195,10 @@ final class TJ_Frontend {
     if (!has_site_icon()) {
       echo '<link rel="icon" href="' . esc_url(TJ_URL . 'assets/img/favicon.png') . "\" />\n";
       echo '<link rel="apple-touch-icon" href="' . esc_url(TJ_URL . 'assets/img/apple-touch-icon.png') . "\" />\n";
+    }
+    if (apply_filters('tj_pwa', true)) {
+      echo '<link rel="manifest" href="' . esc_attr(self::home_path() . '?tj_manifest=main') . "\" />\n";
+      echo "<meta name=\"mobile-web-app-capable\" content=\"yes\" />\n<meta name=\"apple-mobile-web-app-capable\" content=\"yes\" />\n<meta name=\"apple-mobile-web-app-title\" content=\"TicketJunkies\" />\n<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\" />\n";
     }
     echo "<meta name=\"theme-color\" content=\"#ffffff\" media=\"(prefers-color-scheme: light)\" />\n<meta name=\"theme-color\" content=\"#12161f\" media=\"(prefers-color-scheme: dark)\" />\n";
     // Social media previews, only when no SEO plugin (Yoast, Rank Math, All in One SEO, SEOPress) already adds them
@@ -237,7 +308,7 @@ final class TJ_Frontend {
     $text = $ui['footer_text'] !== '' ? esc_html($ui['footer_text']) : esc_html(get_bloginfo('name')) . '. All rights reserved.';
     echo '<div class="tj-root tj-site-footer"><footer class="footer"><div class="wrap footer-inner">';
     echo '<img src="' . esc_url(self::logo()) . '" alt="' . esc_attr(get_bloginfo('name')) . '" class="footer-logo" />';
-    echo '<div class="footer-links"><a href="' . esc_url(home_url('/')) . '">Browse events</a><a href="' . esc_url(tj_route_url('#/register?role=organizer')) . '">Sell tickets</a><a href="' . esc_url(tj_route_url('#/register')) . '">Create account</a></div>';
+    echo '<div class="footer-links"><a href="' . esc_url(home_url('/')) . '">Browse events</a><a href="' . esc_url(tj_route_url('#/register?role=organizer')) . '">Sell tickets</a><a href="' . esc_url(tj_route_url('#/register')) . '">Create account</a>' . (apply_filters('tj_pwa', true) ? '<a href="' . esc_url(tj_route_url('#/app')) . '">📲 Get the app</a>' : '') . '</div>';
     echo '<p class="muted small">© <span id="year">' . esc_html(gmdate('Y')) . '</span> ' . $text . '</p>';
     echo '</div></footer></div>';
   }
