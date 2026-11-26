@@ -393,7 +393,7 @@ final class TJ_Frontend {
       'home' => ['Home', 'home', 'home'], 'event' => ['Event', 'event', 'event'], 'checkout' => ['Checkout', 'checkout', 'checkout'],
       'tickets' => ['My Dashboard', 'my-tickets', 'tickets'], 'organizer' => ['Organizer Dashboard', 'organizer', 'organizer'],
       'admin' => ['Admin Panel', 'ticket-admin', 'admin'], 'login' => ['Log In', 'login', 'login'], 'register' => ['Create Account', 'register', 'register'],
-      'ticket' => ['Your Tickets', 'ticket', 'ticket'], 'scanner' => ['Scanner', 'scanner', 'scanner'],
+      'ticket' => ['Your Tickets', 'ticket', 'ticket'], 'scanner' => ['Ticket Scanner', 'scanner', 'scanner'],
     ];
   }
 

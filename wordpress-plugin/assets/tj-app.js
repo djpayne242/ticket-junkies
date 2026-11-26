@@ -439,7 +439,7 @@ function renderNav() {
     html += link('#/register?role=organizer', 'Sell Tickets') + link('#/login', 'Log In') + `<a href="#/register" class="btn btn-primary btn-sm" style="color:#fff">Sign Up</a>`;
   } else {
     if (me.role === 'admin') html += `<a href="#/admin" class="btn btn-blue btn-sm admin-link" style="color:#fff">⚙ Admin Panel</a>`;
-    if (me.role === 'organizer' || me.role === 'admin') html += link('#/dashboard', 'My Events') + link('#/scan', '📷 Scan') + `<a href="#/create" class="btn btn-primary btn-sm" style="color:#fff">+ Create Event</a>`;
+    if (me.role === 'organizer' || me.role === 'admin') html += link('#/dashboard', 'My Events') + link('#/scan', '📷 Ticket Scanner') + `<a href="#/create" class="btn btn-primary btn-sm" style="color:#fff">+ Create Event</a>`;
     if (me.role === 'organizer' || me.role === 'admin') { const rh = me.role === 'admin' ? '#/admin/reports' : '#/reports'; html += `<a href="${rh}" class="${h.startsWith(rh) ? 'active' : ''}">📈 Reports</a>`; }
     html += link('#/tickets', me.role === 'user' ? '🎟️ My Dashboard' : 'My Tickets');
     html += `<span class="who">${esc(me.name)}<span class="role-pill ${me.role}">${ROLE_LABEL[me.role]}</span></span>`;
@@ -3387,7 +3387,7 @@ function renderAppTabs() {
   const items = [
     ['events', '#/', 'Events', seg === '' || seg === 'event'],
     ['tickets', me ? '#/tickets' : '#/login?next=%23%2Ftickets', 'Tickets', seg === 'tickets' || seg === 'order' || seg === 't'],
-    organizer ? ['scan', '#/scan', 'Scan', seg === 'scan'] : ['cart', '#/cart', 'Cart', seg === 'cart' || seg === 'checkout'],
+    organizer ? ['scan', '#/scan', 'Ticket Scanner', seg === 'scan'] : ['cart', '#/cart', 'Cart', seg === 'cart' || seg === 'checkout'],
     ['menu', '#', me ? 'Account' : 'Log in', ['login', 'register', 'dashboard', 'create', 'edit', 'attendees', 'reports', 'admin'].includes(seg)],
   ];
   const n = cartCount();

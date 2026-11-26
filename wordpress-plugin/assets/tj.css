@@ -1327,6 +1327,8 @@ html[data-tj-app] .tj-root .topbar-inner .cart-btn { margin-left: auto; }
 .tj-root .scan-brand { display: flex; align-items: center; gap: 12px; }
 .tj-root .scan-brand img { width: 44px; height: 44px; flex: none; object-fit: contain; }
 @media (max-width: 640px) { .tj-root .scan-brand img { width: 36px; height: 36px; } }
+/* keep tab labels such as "Ticket Scanner" on one line */
+.tj-root .app-tab span { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
 
 
 /* =========================================================

@@ -317,6 +317,9 @@ In **Create Event → Date & time** there are two dropdowns:
   - **Location:** "Choose a saved venue" fills in the main venue, address, city and map pin. **More venues** adds extra places for events held at more than one venue (up to 10 in total). Pick a saved venue or type one in; a saved venue's address fills in by itself.
   - **Event page:** lists every venue with its own Directions link. Event cards show "+N venues".
 
+## 📷 "Ticket Scanner" menu name (v1.3.5)
+- The menu link **📷 Scan** is now **📷 Ticket Scanner**, and the bottom tab in the phone app says **Ticket Scanner** (kept on one line). On WordPress the Scanner page is now titled **Ticket Scanner**. Existing sites are renamed once on the next wp-admin visit, but only if the page is still called "Scanner", so a title you chose yourself is kept.
+
 ## 🎟️ Scanner heading with the Ticket Junkies icon (v1.3.4)
 - The scanner's heading now reads **Ticket Junkies Scanner** (was "📷 TJ Scanner"), with the Ticket Junkies three-ticket icon on its left. The icon has a see-through background, so it suits light and dark mode. Files: `public/tj-icon.png` (Node) and `assets/img/tj-icon.png` (WordPress).
 

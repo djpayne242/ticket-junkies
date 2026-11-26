@@ -14,6 +14,12 @@ final class TJ_Admin {
         $p = get_option('tj_pages', []);
         if (empty($p['scanner'])) TJ_Frontend::install(false, 'scanner');
       }
+      // v1.3.5: the Scanner page is now called "Ticket Scanner" (only renamed if you haven't changed its title yourself)
+      if (!get_option('tj_scanner_title_v2') && current_user_can('manage_options')) {
+        update_option('tj_scanner_title_v2', 1);
+        $p = get_option('tj_pages', []);
+        if (!empty($p['scanner']) && get_the_title($p['scanner']) === 'Scanner') wp_update_post(['ID' => (int) $p['scanner'], 'post_title' => 'Ticket Scanner']);
+      }
     });
     add_action('admin_post_tj_ui', [__CLASS__, 'save_ui']);
     add_action('admin_post_tj_pages', [__CLASS__, 'rebuild_pages']);
