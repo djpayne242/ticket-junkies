@@ -68,7 +68,8 @@ function str(v, { name, max = 200, required = false } = {}) {
 let db;
 function saveDb() {
   const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
+  // Compact JSON: noticeably faster to write as the number of orders grows.
+  fs.writeFileSync(tmp, JSON.stringify(db));
   fs.renameSync(tmp, DB_FILE);
 }
 function loadDb() {
@@ -249,7 +250,9 @@ function startSession(res, user) {
   const token = crypto.randomBytes(32).toString('hex');
   const now = Date.now(), ms = sessionMs(user);
   db.sessions[token] = { userId: user.id, created: now, lastSeen: now, expires: now + ms };
-  res.setHeader('Set-Cookie', `tj_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.round(ms / 1000)}`);
+  // Secure: on https the log-in cookie is never sent over a plain http connection.
+  const secure = res.req && requestOrigin(res.req).startsWith('https:') ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `tj_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.round(ms / 1000)}${secure}`);
 }
 function checkPassword(pw, label = 'Password') {
   const n = SEC().minPassword;
@@ -816,12 +819,12 @@ async function requireCaptcha(req, body, where) {
 }
 
 // ---------- request plumbing ----------
-function readBody(req) {
+function readBody(req, limit = MAX_BODY) {
   return new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > MAX_BODY) { reject(new HttpError(413, 'Upload too large (max 8MB)')); req.destroy(); return; }
+      if (size > limit) { reject(new HttpError(413, limit >= MAX_BODY ? 'Upload too large (max 8MB)' : 'Request too large')); req.destroy(); return; }
       chunks.push(c);
     });
     req.on('end', () => {
@@ -843,6 +846,42 @@ function compress(buf, enc) {
     : zlib.gzipSync(buf, { level: 6 });
 }
 const SECURITY_HEADERS = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin' };
+// Sent with every response: stop other sites framing the pages (clickjacking), switch off browser features the
+// site never uses, and keep plugins/<base> tricks out. Camera (QR check-in) and location (weather) stay allowed for this site.
+const BASE_HEADERS = {
+  ...SECURITY_HEADERS,
+  'X-Frame-Options': 'SAMEORIGIN',
+  'Permissions-Policy': 'camera=(self), geolocation=(self), microphone=(), payment=(), usb=()',
+  'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+  'Content-Security-Policy': "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'",
+};
+// Simple per-visitor speed limits for the forms bots like to hammer (log in, sign up, password reset, uploads, checkout).
+const RATE_LIMITS = {
+  'POST /api/auth/login': [20, 10 * 60000],
+  'POST /api/auth/register': [10, 60 * 60000],
+  'POST /api/auth/forgot': [5, 15 * 60000],
+  'POST /api/auth/reset': [10, 15 * 60000],
+  'POST /api/upload': [60, 60 * 60000],
+  'POST /api/cart/checkout': [20, 10 * 60000],
+};
+const rateHits = new Map(); // "rule|ip" -> [timestamps]
+function rateLimit(req, rule, [max, windowMs]) {
+  const key = rule + '|' + clientIp(req);
+  const now = Date.now();
+  const hits = (rateHits.get(key) || []).filter((t) => now - t < windowMs);
+  if (hits.length >= max) fail(429, `Too many attempts. Please wait ${Math.max(1, Math.ceil((windowMs - (now - hits[0])) / 60000))} minute(s) and try again.`);
+  hits.push(now);
+  rateHits.set(key, hits);
+  if (rateHits.size > 20000) rateHits.clear();
+}
+// Real image check: the file's first bytes must match its type (a renamed script or web page is refused).
+function imageBytesOk(buf, type) {
+  if (type === 'png') return buf.length > 8 && buf[0] === 0x89 && buf.slice(1, 4).toString('latin1') === 'PNG';
+  if (type === 'jpg' || type === 'jpeg') return buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  if (type === 'gif') return buf.length > 6 && buf.slice(0, 4).toString('latin1') === 'GIF8';
+  if (type === 'webp') return buf.length > 12 && buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP';
+  return false;
+}
 function send(res, status, obj) {
   let body = Buffer.from(JSON.stringify(obj));
   const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Vary': 'Accept-Encoding', ...SECURITY_HEADERS };
@@ -1392,6 +1431,7 @@ route('POST', '/api/upload', ({ req, body }) => {
   if (!m) fail(400, 'Upload a PNG, JPG, WEBP or GIF image');
   const buf = Buffer.from(m[2], 'base64');
   if (buf.length > 5 * 1024 * 1024) fail(413, 'Image must be 5MB or smaller');
+  if (!imageBytesOk(buf, m[1])) fail(400, "That file isn't a real image. Please upload a PNG, JPG, WEBP or GIF.");
   const name = `${crypto.randomBytes(10).toString('hex')}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
   fs.writeFileSync(path.join(UPLOADS, name), buf);
   return { url: `/uploads/${name}` };
@@ -2401,7 +2441,11 @@ ${ev ? `<script type="application/ld+json">${JSON.stringify(eventJsonLd(ev, orig
 // ---------- server ----------
 loadDb();
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
+  for (const [k, v] of Object.entries(BASE_HEADERS)) res.setHeader(k, v);
+  // On https, tell browsers to always use https for this site (6 months)
+  if (requestOrigin(req).startsWith('https:')) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); } catch { res.writeHead(400); return res.end('Bad request'); }
   const qr = /^\/qr\/(TJ-[0-9A-F]{8})\.(png|svg)$/.exec(url.pathname);
   if (qr) {
     const png = qr[2] === 'png';
@@ -2431,8 +2475,13 @@ const server = http.createServer(async (req, res) => {
     const r = routes.find((x) => x.method === req.method && x.re.test(url.pathname));
     if (!r) fail(404, 'Not found');
     const m = r.re.exec(url.pathname);
-    const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
-    const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
+    let params;
+    try { params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])); } catch { fail(400, 'Bad address'); }
+    const rk = `${req.method} ${url.pathname}`;
+    if (RATE_LIMITS[rk]) rateLimit(req, rk, RATE_LIMITS[rk]);
+    else if (req.method === 'POST' && /^\/api\/events\/[^/]+\/checkout$/.test(url.pathname)) rateLimit(req, 'checkout', [20, 10 * 60000]);
+    // Only image uploads may be large; everything else is small JSON.
+    const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req, url.pathname === '/api/upload' ? MAX_BODY : 2 * 1024 * 1024) : {};
     const result = await r.handler({ req, res, body, params, query: url.searchParams });
     if (result !== RAW_SENT) send(res, 200, result);
   } catch (e) {
@@ -2440,6 +2489,10 @@ const server = http.createServer(async (req, res) => {
     send(res, e.status || 500, { error: e instanceof HttpError ? e.message : 'Something went wrong' });
   }
 });
+// Slow-connection protection: drop clients that send headers or requests too slowly.
+server.headersTimeout = 20000;
+server.requestTimeout = 120000;
+server.keepAliveTimeout = 5000;
 server.listen(PORT, () => {
   console.log(`TicketJunkies running at http://localhost:${PORT}`);
   // Locate any events that don't have map coordinates yet (runs quietly in the background).

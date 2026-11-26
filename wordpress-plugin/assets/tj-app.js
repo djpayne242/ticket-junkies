@@ -106,7 +106,12 @@ const loadingHtml = () => (META.preloader && META.preloader.enabled ? '<div clas
 const loading = () => { $app.innerHTML = loadingHtml(); };
 
 function cover(ev, cls = '') {
-  if (ev.imageUrl) return `<div class="cover has-img ${cls}"><img class="cover-img" src="${esc(ev.imageUrl)}" alt="${esc(ev.title)}" ${cls === 'big' ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async" /></div>`;
+  if (ev.imageUrl) {
+    // Built-in flyers have a light 800px copy for cards; the browser picks the right size for the screen.
+    const card = /^\/flyers\/[\w-]+\.jpg$/.test(ev.imageUrl) && !/-(card|share)\.jpg$/.test(ev.imageUrl) ? ev.imageUrl.replace(/\.jpg$/, '-card.jpg') : '';
+    const srcset = card ? ` srcset="${esc(card)} 800w, ${esc(ev.imageUrl)} 1600w" sizes="${cls === 'big' ? '(max-width: 1240px) 100vw, 1200px' : '(max-width: 640px) 100vw, 420px'}"` : '';
+    return `<div class="cover has-img ${cls}"><img class="cover-img" src="${esc(cls === 'big' || !card ? ev.imageUrl : card)}"${srcset} alt="${esc(ev.title)}" ${cls === 'big' ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async" /></div>`;
+  }
   const [a, b, icon] = CAT_STYLE[ev.category] || ['#376eb8', '#84d65f', '🎟️'];
   return `<div class="cover ${cls}" style="background:linear-gradient(135deg,${a},${b})"><span class="cover-icon">${icon}</span><span class="cover-title">${esc(ev.title)}</span></div>`;
 }

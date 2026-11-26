@@ -43,6 +43,7 @@ final class TJ_Frontend {
     add_action('wp_head', [__CLASS__, 'head'], 1);
     add_filter('wp_resource_hints', function ($urls, $rel) { if ($rel === 'preconnect') { $urls[] = 'https://fonts.googleapis.com'; $urls[] = ['href' => 'https://fonts.gstatic.com', 'crossorigin' => 'anonymous']; } return $urls; }, 10, 2);
     add_filter('body_class', function ($c) { $c[] = 'tj-page'; return $c; });
+    self::hardening();
     add_shortcode('ticketjunkies', [__CLASS__, 'shortcode']);
     // Attendees & organizers use the TicketJunkies dashboards, not the WordPress back office
     add_filter('show_admin_bar', function ($show) { return $show && current_user_can('edit_posts'); });
@@ -69,6 +70,54 @@ final class TJ_Frontend {
     if ($ui['header'] || $ui['footer']) add_filter('hello_elementor_header_footer', '__return_false');
     if ($ui['header']) add_action('wp_body_open', [__CLASS__, 'header'], 5);
     if ($ui['footer']) add_action('wp_footer', [__CLASS__, 'footer'], 0);
+  }
+
+  /**
+   * Security & speed hardening for the whole site. Each part can be switched off with a filter
+   * (e.g. add_filter('tj_harden_xmlrpc', '__return_false') if a service such as Jetpack needs XML-RPC).
+   */
+  public static function hardening() {
+    // Security headers on every front-end page
+    add_action('send_headers', function () {
+      if (headers_sent() || !apply_filters('tj_harden_headers', true)) return;
+      header('X-Content-Type-Options: nosniff');
+      header('X-Frame-Options: SAMEORIGIN');
+      header('Referrer-Policy: strict-origin-when-cross-origin');
+      header('Permissions-Policy: camera=(self), geolocation=(self), microphone=(), payment=(), usb=()');
+      if (is_ssl()) header('Strict-Transport-Security: max-age=15552000');
+    });
+    // Don't advertise the WordPress version
+    remove_action('wp_head', 'wp_generator');
+    add_filter('the_generator', '__return_empty_string');
+    // XML-RPC is a common password-guessing target; block its log-in methods (pingbacks too)
+    if (apply_filters('tj_harden_xmlrpc', true)) {
+      add_filter('xmlrpc_enabled', '__return_false');
+      add_filter('xmlrpc_methods', function ($m) { unset($m['pingback.ping'], $m['pingback.extensions.getPingbacks']); return $m; });
+      add_filter('wp_headers', function ($h) { unset($h['X-Pingback']); return $h; });
+    }
+    // Stop visitors listing user accounts (?author=1 and the public users API), which bots use to guess log-in names
+    if (apply_filters('tj_harden_user_list', true)) {
+      add_action('template_redirect', function () {
+        if (!is_user_logged_in() && isset($_GET['author'])) { wp_safe_redirect(home_url('/'), 301); exit; }
+      }, 0);
+      add_filter('rest_endpoints', function ($e) {
+        if (is_user_logged_in()) return $e;
+        foreach (array_keys($e) as $route) if (strpos($route, '/wp/v2/users') === 0) unset($e[$route]);
+        return $e;
+      });
+    }
+    // Speed: drop the emoji script/styles every page loads (all browsers show emoji natively)
+    if (apply_filters('tj_speed_emoji', true)) {
+      remove_action('wp_head', 'print_emoji_detection_script', 7);
+      remove_action('wp_print_styles', 'print_emoji_styles');
+      remove_action('admin_print_scripts', 'print_emoji_detection_script');
+      remove_action('admin_print_styles', 'print_emoji_styles');
+      add_filter('emoji_svg_url', '__return_false');
+    }
+    // Speed: remove the old embed helper script and RSD/WLW links nobody uses
+    remove_action('wp_head', 'rsd_link');
+    remove_action('wp_head', 'wlwmanifest_link');
+    add_action('wp_footer', function () { if (apply_filters('tj_speed_embed', true)) wp_dequeue_script('wp-embed'); });
   }
 
   /** Theme is applied before paint so dark mode never flashes white */

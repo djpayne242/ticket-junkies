@@ -286,6 +286,24 @@ class TJ_Rest {
     $on = !empty($c['enabled']) && !empty($c['siteKey']) && !empty($c['secretKey']);
     return array('siteKey' => $on ? $c['siteKey'] : '', 'register' => (bool) ($on && !empty($c['protectRegister'])), 'checkout' => (bool) ($on && !empty($c['protectCheckout'])), 'testKeys' => $c['siteKey'] === TJ_Store::RECAPTCHA_TEST_SITE);
   }
+  /** Simple per-visitor speed limit for forms bots like to hammer (log in, sign up, uploads, checkout). */
+  private static function rate_limit($rule, $max, $window) {
+    $key = 'tj_rl_' . md5($rule . '|' . self::client_ip());
+    $now = time();
+    $hits = get_transient($key);
+    $hits = is_array($hits) ? array_values(array_filter($hits, function ($t) use ($now, $window) { return $now - $t < $window; })) : array();
+    if (count($hits) >= $max) self::fail(429, 'Too many attempts. Please wait ' . max(1, (int) ceil(($window - ($now - $hits[0])) / 60)) . ' minute(s) and try again.');
+    $hits[] = $now;
+    set_transient($key, $hits, $window);
+  }
+  /** Real image check: the file's first bytes must match its type (a renamed script or web page is refused). */
+  private static function image_bytes_ok($buf, $type) {
+    if ($type === 'png') return strlen($buf) > 8 && substr($buf, 0, 4) === "\x89PNG";
+    if ($type === 'jpg' || $type === 'jpeg') return strlen($buf) > 3 && substr($buf, 0, 3) === "\xFF\xD8\xFF";
+    if ($type === 'gif') return strlen($buf) > 6 && substr($buf, 0, 4) === 'GIF8';
+    if ($type === 'webp') return strlen($buf) > 12 && substr($buf, 0, 4) === 'RIFF' && substr($buf, 8, 4) === 'WEBP';
+    return false;
+  }
   private static function client_ip() {
     $f = isset($_SERVER['HTTP_X_FORWARDED_FOR']) ? trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_FOR'])[0]) : '';
     return $f !== '' ? $f : (isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '');
@@ -692,6 +710,7 @@ class TJ_Rest {
   // auth
   // =====================================================================
   public static function r_register($c) {
+    self::rate_limit('register', 10, HOUR_IN_SECONDS);
     $b = $c['body'];
     self::require_captcha($b, 'register');
     $name = self::str(self::g($b, 'name'), 'Name', 80, true);
@@ -717,6 +736,7 @@ class TJ_Rest {
   }
 
   public static function r_login($c) {
+    self::rate_limit('login', 20, 10 * MINUTE_IN_SECONDS);
     $b = $c['body'];
     $email = strtolower(self::str(self::g($b, 'email'), 'Email', 160, true));
     $user = TJ_Store::user_by_email($email);
@@ -1003,6 +1023,7 @@ class TJ_Rest {
 
   public static function r_checkout($c) {
     $user = self::require_user();
+    self::rate_limit('checkout', 20, 10 * MINUTE_IN_SECONDS);
     $body = $c['body'];
     // Verified first; the stock check + order creation below then run under a lock, so ticket counts can't be oversold.
     self::require_captcha($body, 'checkout');
@@ -1017,6 +1038,7 @@ class TJ_Rest {
   /** Shopping cart: tickets for several events paid in one go. Every event is checked first (all locked), so either the whole cart is bought or nothing is. */
   public static function r_cart_checkout($c) {
     $user = self::require_user();
+    self::rate_limit('checkout', 20, 10 * MINUTE_IN_SECONDS);
     $b = $c['body'];
     $carts = array();
     $list = is_array(self::g($b, 'carts')) && wp_is_numeric_array($b['carts']) ? $b['carts'] : array();
@@ -1333,8 +1355,11 @@ class TJ_Rest {
     self::require_organizer();
     $data = self::g($c['body'], 'dataUrl');
     if (!is_string($data) || !preg_match('~^data:image/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$~', $data, $m)) self::fail(400, 'Upload a PNG, JPG, WEBP or GIF image');
-    $buf = base64_decode($m[2]);
+    self::rate_limit('upload', 60, HOUR_IN_SECONDS);
+    $buf = base64_decode($m[2], true);
+    if ($buf === false) self::fail(400, 'Upload a PNG, JPG, WEBP or GIF image');
     if (strlen($buf) > 5 * 1024 * 1024) self::fail(413, 'Image must be 5MB or smaller');
+    if (!self::image_bytes_ok($buf, $m[1])) self::fail(400, "That file isn't a real image. Please upload a PNG, JPG, WEBP or GIF.");
     $ext = $m[1] === 'jpeg' ? 'jpg' : $m[1];
     $url = self::save_upload(self::rand_hex(10) . '.' . $ext, $buf);
     if (!$url) self::fail(500, 'Could not save the image');
