@@ -1165,6 +1165,39 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
   // Verified first: everything after this point runs without pausing, so ticket counts can't be oversold.
   await requireCaptcha(req, body, 'checkout');
   const ev = db.events.find((e) => e.id === params.id);
+  const order = placeOrder(user, ev, body);
+  Notify.orderPlaced(order, ev);
+  return { order: orderView(order) };
+});
+
+// Shopping cart: tickets for several events paid in one go. Every event is checked first,
+// so either the whole cart is bought or nothing is (no awaits in between, so nothing can sell out halfway).
+route('POST', '/api/cart/checkout', async ({ req, body }) => {
+  const user = requireUser(req);
+  const carts = (Array.isArray(body.carts) ? body.carts : []).filter((c) => c && typeof c === 'object');
+  if (!carts.length) fail(400, 'Your cart is empty');
+  if (carts.length > 20) fail(400, 'Your cart can hold tickets for up to 20 events at a time');
+  const ids = carts.map((c) => String(c.eventId || ''));
+  if (new Set(ids).size !== ids.length) fail(400, 'Each event can only be in your cart once');
+  await requireCaptcha(req, body, 'checkout');
+  const shared = { buyerFirstName: body.buyerFirstName, buyerLastName: body.buyerLastName, buyerName: body.buyerName, buyerEmail: body.buyerEmail, buyerPhone: body.buyerPhone, payment: body.payment };
+  const jobs = carts.map((c, i) => {
+    const ev = db.events.find((e) => e.id === ids[i]);
+    if (!ev) fail(404, 'One of the events in your cart is no longer available. Please remove it and try again.');
+    return { ev, b: { ...shared, items: c.items, attendees: c.attendees } };
+  });
+  for (const j of jobs) {
+    try { placeOrder(user, j.ev, j.b, { dry: true }); }
+    catch (e) { if (e instanceof HttpError && jobs.length > 1) e.message = `${j.ev.title}: ${e.message}`; throw e; }
+  }
+  const cartId = newId('cart');
+  const orders = jobs.map((j) => placeOrder(user, j.ev, j.b, { cartId }));
+  orders.forEach((o, i) => Notify.orderPlaced(o, jobs[i].ev));
+  return { cartId, orders: orders.map(orderView) };
+});
+
+// Checks one event's tickets + buyer + payment and creates the order (dry: check only, change nothing).
+function placeOrder(user, ev, body, { dry = false, cartId = '' } = {}) {
   if (!ev || ev.status !== 'published') fail(404, 'This event is not available for purchase');
   if (new Date(ev.endsAt).getTime() < Date.now()) fail(400, 'This event has already ended');
   const items = Array.isArray(body.items) ? body.items : [];
@@ -1225,6 +1258,7 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
     card = cardInfo(num, cardHolder);
   }
 
+  if (dry) return null;
   const tickets = [];
   for (const l of lines) {
     l.tier.sold += l.qty;
@@ -1238,12 +1272,12 @@ route('POST', '/api/events/:id/checkout', async ({ req, body, params }) => {
     tickets, buyerName, buyerFirstName, buyerLastName, buyerEmail, buyerPhone, subtotal, fees, total, ...card, status: 'paid',
     key: crypto.randomBytes(12).toString('hex'), createdAt: new Date().toISOString(),
   };
+  if (cartId) order.cartId = cartId;
   db.orders.push(order);
   if (!user.phone) user.phone = buyerPhone;
   saveDb();
-  Notify.orderPlaced(order, ev);
-  return { order: orderView(order) };
-});
+  return order;
+}
 
 // Complimentary tickets: organizer (own events) or admin issues free tickets from any ticket type, public or private.
 route('POST', '/api/events/:id/comp', ({ req, body, params }) => {

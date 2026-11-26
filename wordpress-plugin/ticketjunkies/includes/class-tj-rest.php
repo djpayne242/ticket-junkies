@@ -112,6 +112,7 @@ class TJ_Rest {
     self::route('PUT', '/events/:id', 'r_event_update');
     self::route('DELETE', '/events/:id', 'r_event_delete');
     self::route('POST', '/events/:id/checkout', 'r_checkout');
+    self::route('POST', '/cart/checkout', 'r_cart_checkout');
     self::route('POST', '/events/:id/comp', 'r_comp');
     self::route('GET', '/orders', 'r_orders');
     self::route('GET', '/orders/:id', 'r_order');
@@ -1013,7 +1014,45 @@ class TJ_Rest {
       TJ_Store::unlock($lock);
     }
   }
-  private static function checkout_locked($user, $id, $body) {
+  /** Shopping cart: tickets for several events paid in one go. Every event is checked first (all locked), so either the whole cart is bought or nothing is. */
+  public static function r_cart_checkout($c) {
+    $user = self::require_user();
+    $b = $c['body'];
+    $carts = array();
+    $list = is_array(self::g($b, 'carts')) && wp_is_numeric_array($b['carts']) ? $b['carts'] : array();
+    foreach ($list as $x) if (is_array($x)) $carts[] = $x;
+    if (!$carts) self::fail(400, 'Your cart is empty');
+    if (count($carts) > 20) self::fail(400, 'Your cart can hold tickets for up to 20 events at a time');
+    $ids = array();
+    foreach ($carts as $x) $ids[] = is_scalar(self::g($x, 'eventId')) ? (string) $x['eventId'] : '';
+    if (count(array_unique($ids)) !== count($ids)) self::fail(400, 'Each event can only be in your cart once');
+    self::require_captcha($b, 'checkout');
+    $shared = array();
+    foreach (array('buyerFirstName', 'buyerLastName', 'buyerName', 'buyerEmail', 'buyerPhone', 'payment') as $k) if (array_key_exists($k, $b)) $shared[$k] = $b[$k];
+    $sorted = $ids; sort($sorted);
+    $locks = array(); $done = array(); $cartId = '';
+    try {
+      foreach ($sorted as $id) $locks[] = TJ_Store::lock('event_' . $id);
+      TJ_Store::flush_cache();
+      $bodies = array();
+      foreach ($carts as $i => $x) {
+        $ev = TJ_Store::get_event($ids[$i]);
+        if (!$ev) self::fail(404, 'One of the events in your cart is no longer available. Please remove it and try again.');
+        $bodies[$i] = array_merge($shared, array('items' => self::g($x, 'items'), 'attendees' => self::g($x, 'attendees')));
+        try { self::checkout_locked($user, $ids[$i], $bodies[$i], true); }
+        catch (TJ_Fail $e) { if (count($carts) > 1) throw new TJ_Fail($e->status, $ev['title'] . ': ' . $e->getMessage()); throw $e; }
+      }
+      $cartId = TJ_Store::new_id('cart');
+      foreach ($carts as $i => $x) $done[] = self::checkout_locked($user, $ids[$i], $bodies[$i], false, $cartId);
+    } finally {
+      foreach ($locks as $l) TJ_Store::unlock($l);
+    }
+    foreach ($done as $d) TJ_Notify::order_placed($d['order'], $d['ev']);
+    $views = array();
+    foreach ($done as $d) $views[] = self::order_view($d['order']);
+    return array('cartId' => $cartId, 'orders' => $views);
+  }
+  private static function checkout_locked($user, $id, $body, $dry = false, $cartId = '') {
     $ev = TJ_Store::get_event($id);
     if (!$ev || $ev['status'] !== 'published') self::fail(404, 'This event is not available for purchase');
     if (TJ_Store::ts_ms($ev['endsAt']) < self::now_ms()) self::fail(400, 'This event has already ended');
@@ -1086,6 +1125,7 @@ class TJ_Rest {
       $card = self::card_info($num, $cardHolder);
     }
 
+    if ($dry) return null;
     $tickets = array(); $oitems = array();
     foreach ($lines as $l) {
       $ev['tiers'][$l['ti']]['sold'] += $l['qty'];
@@ -1100,9 +1140,11 @@ class TJ_Rest {
       'items' => $oitems, 'tickets' => $tickets, 'buyerName' => $buyerName, 'buyerFirstName' => $buyerFirstName, 'buyerLastName' => $buyerLastName,
       'buyerEmail' => $buyerEmail, 'buyerPhone' => $buyerPhone, 'subtotal' => self::n($subtotal), 'fees' => self::n($fees), 'total' => self::n($total),
     ), $card, array('status' => 'paid', 'key' => self::rand_hex(12), 'createdAt' => TJ_Store::now_iso()));
+    if ($cartId !== '') $order['cartId'] = $cartId;
     TJ_Store::save_event($ev);
     TJ_Store::save_order($order);
     if (!$user['phone']) update_user_meta($user['id'], 'tj_phone', $buyerPhone);
+    if ($cartId !== '') return array('order' => $order, 'ev' => $ev);
     TJ_Notify::order_placed($order, $ev);
     return array('order' => self::order_view($order));
   }

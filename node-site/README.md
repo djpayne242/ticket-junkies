@@ -28,6 +28,14 @@ The owner account controls the Admin Panel and can also post events ("My Events"
 
 **Countdowns:** every event card shows a large "⏳ Goes live in" countdown with Days / Hours / Minutes / Seconds boxes counting down to the event's start time, the event page has a large "This event goes live in" Days / Hours / Minutes / Seconds countdown, and the calendar pop-up shows one too. When the event starts it switches to "Live now" ("🔴 This event is LIVE now!" on the event page), then "Ended".
 
+**Shopping cart:**
+- **Header:** a 🛒 button with a count. On WordPress it is added to the TicketJunkies header and opens the Checkout page at `#/cart`.
+- **Event pages:** besides "Continue to checkout" (buy now), there is **Add to cart** / **Update cart**.
+- **Saving:** the cart is kept in the browser (localStorage `tj_basket`) for up to 30 days, works before logging in, and stays in step across tabs.
+- **Cart page (`#/cart`):** each event with a picture, date and venue, a quantity menu per ticket type, Remove, Empty cart and a live total. It rechecks availability: quantities are trimmed to what is left, the per-person limit and sales windows apply, and ended or cancelled events must be removed.
+- **Cart checkout (`#/cart/checkout`):** account required, one form, one payment. "Who's coming?" appears per event.
+- **Server (`POST /api/cart/checkout`, WP `/tj/v1/cart/checkout`):** checks every event first, so **either the whole cart is bought or nothing is**, then creates one order per event linked by a shared `cartId`. Each order sends its usual emails (buyer, guests, organizer, admin). On WordPress all events in the cart are locked during the purchase.
+
 **Ticket sale emails:**
 - **Buyer:** a QR code for every ticket, plus all tickets attached as one PDF (and QR images), with a "Download tickets (PDF)" button.
 - **Each guest:** at checkout, "Who's coming?" lets the buyer add a name and email for every ticket after the first. Each guest with an email gets their own email with only their ticket(s), a PDF attachment and a personal download link (`/api/tickets/<order>/pdf?code=…&tk=…`). The link is signed per ticket, so it never opens the rest of the order. Their name is printed on the PDF and shown at check-in.

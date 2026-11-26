@@ -450,6 +450,8 @@ async function routePage() {
     if (!a) return await pageHome(params);
     if (a === 'event' && b) return await pageEvent(b);
     if (a === 'checkout' && b) return await pageCheckout(b);
+    if (a === 'cart' && b === 'checkout') return await pageCartCheckout();
+    if (a === 'cart') return await pageCart();
     if (a === 'login') return pageLogin(params);
     if (a === 'register') return pageRegister(params);
     if (a === 'forgot') return pageForgot(params);
@@ -793,6 +795,8 @@ async function pageEvent(id) {
         <div class="total"><span>Total</span><span>${money(tt.total)}</span></div>
       </div>
       <button class="btn btn-primary btn-block" id="toCheckout" style="margin-top:14px" ${tt.count && buyable && tt.ok ? '' : 'disabled'}>${tt.count ? `Continue to checkout · ${tt.count} ticket${tt.count > 1 ? 's' : ''}` : 'Select tickets'}</button>
+      ${buyable ? `<button class="btn btn-ghost btn-block add-cart-btn" id="addCart" ${tt.count && tt.ok ? '' : 'disabled'}>🛒 ${inCart ? 'Update cart' : 'Add to cart'}${tt.count ? ` · ${tt.count} ticket${tt.count > 1 ? 's' : ''}` : ''}</button>` : ''}
+      ${inCart ? `<p class="small in-cart-note">🛒 ${cartCount(cartOnly(ev.id))} ticket${cartCount(cartOnly(ev.id)) === 1 ? '' : 's'} for this event in <a href="#/cart">your cart</a></p>` : ''}
       ${!me ? '<p class="muted small" style="text-align:center;margin:10px 0 0">🔒 You will create a free account (or log in) before checkout, so all your tickets are saved in your dashboard.</p>' : ''}`;
     panel.querySelectorAll('select[data-tier]').forEach((s) => (s.onchange = () => { qty[s.dataset.tier] = Number(s.value); renderPicker(); }));
     panel.querySelectorAll('input[data-amt]').forEach((inp) => {
@@ -803,16 +807,266 @@ async function pageEvent(id) {
       sessionStorage.setItem('tj_cart', JSON.stringify({ id: ev.id, qty, amt }));
       go('#/checkout/' + ev.id);
     };
+    const ac = document.getElementById('addCart');
+    if (ac) ac.onclick = () => {
+      cartPut(ev, qty, amt);
+      inCart = true;
+      toast(`🛒 Added to your cart · ${cartCount()} ticket${cartCount() === 1 ? '' : 's'} in total`);
+      renderPicker();
+    };
   }
 
   // a ticket type's sales just opened → show its quantity picker
   panel.addEventListener('tj:onsale', () => setTimeout(renderPicker, 300));
+  // tickets for this event already in the shopping cart
+  let inCart = !!cartLoad()[ev.id];
+  if (inCart) { const c = cartLoad()[ev.id]; for (const t of ev.tiers) if (c.qty[t.id]) { qty[t.id] = Math.min(Number(c.qty[t.id]) || 0, tierCap(t)); if (c.amt && c.amt[t.id] !== undefined && tierKindOf(t) === 'donation') amt[t.id] = c.amt[t.id]; } }
   // restore cart after login redirect
   try {
     const saved = JSON.parse(sessionStorage.getItem('tj_cart') || 'null');
     if (saved && saved.id === ev.id) for (const t of ev.tiers) { qty[t.id] = Math.min(saved.qty[t.id] || 0, tierCap(t)); if (saved.amt && saved.amt[t.id] !== undefined && tierKindOf(t) === 'donation') amt[t.id] = saved.amt[t.id]; }
   } catch {}
   renderPicker();
+}
+
+// ---------- shopping cart (tickets from several events, paid in one checkout) ----------
+const CART_KEY = 'tj_basket';
+function cartLoad() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CART_KEY) || '{}');
+    if (!c || typeof c !== 'object' || Array.isArray(c)) return {};
+    for (const [id, e] of Object.entries(c)) if (!e || typeof e !== 'object' || !e.qty || Date.now() - (e.addedAt || 0) > 30 * 86400000) delete c[id];
+    return c;
+  } catch { return {}; }
+}
+function cartSave(c) {
+  try { if (Object.keys(c).length) localStorage.setItem(CART_KEY, JSON.stringify(c)); else localStorage.removeItem(CART_KEY); } catch {}
+  updateCartBadge();
+}
+const cartOnly = (id) => { const e = cartLoad()[id]; return e ? { [id]: e } : {}; };
+const cartCount = (c = cartLoad()) => Object.values(c).reduce((a, e) => a + Object.values(e.qty || {}).reduce((x, y) => x + (Number(y) || 0), 0), 0);
+function cartPut(ev, qty, amt) {
+  const c = cartLoad();
+  const q = {}, a = {};
+  for (const [k, v] of Object.entries(qty)) if (Number(v) > 0) { q[k] = Number(v); if (amt && amt[k] !== undefined) a[k] = amt[k]; }
+  if (Object.keys(q).length) c[ev.id] = { qty: q, amt: a, title: ev.title, addedAt: Date.now() }; else delete c[ev.id];
+  cartSave(c);
+}
+const CART_ICON = '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2.5 3h2.6l2.6 12.2a1.6 1.6 0 0 0 1.6 1.3h8.6a1.6 1.6 0 0 0 1.6-1.2L21.5 7H6"/></svg>';
+function updateCartBadge() {
+  const n = cartCount();
+  document.querySelectorAll('.cart-count').forEach((b) => { b.textContent = n > 99 ? '99+' : String(n); b.hidden = !n; });
+  document.querySelectorAll('.cart-btn').forEach((b) => { b.classList.toggle('has-items', !!n); b.setAttribute('aria-label', n ? `Shopping cart, ${n} ticket${n === 1 ? '' : 's'}` : 'Shopping cart'); });
+}
+function mountCartBtn() {
+  const bar = document.querySelector('.topbar-inner');
+  if (bar && !bar.querySelector('.cart-btn')) {
+    const a = document.createElement('a');
+    a.className = 'cart-btn'; a.href = '#/cart'; a.title = 'Shopping cart';
+    a.innerHTML = CART_ICON + '<span class="cart-count" hidden>0</span>';
+    bar.insertBefore(a, bar.querySelector('#themeSwitch') || bar.querySelector('#menuBtn'));
+  }
+  updateCartBadge();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountCartBtn); else mountCartBtn();
+window.addEventListener('storage', (e) => { if (e.key === CART_KEY) updateCartBadge(); });
+
+// Loads every event in the cart with live availability; quantities are trimmed to what can still be bought.
+async function cartLines() {
+  const c = cartLoad();
+  const ids = Object.keys(c);
+  const res = await Promise.allSettled(ids.map((id) => api('/api/events/' + encodeURIComponent(id))));
+  const out = [];
+  ids.forEach((id, i) => {
+    const entry = c[id];
+    if (res[i].status !== 'fulfilled') { out.push({ id, entry, ev: null, problem: 'This event is no longer available', lines: [] }); return; }
+    const ev = res[i].value.event;
+    const ended = new Date(ev.endsAt) < new Date();
+    const problem = ev.status !== 'published' ? (ev.status === 'cancelled' ? 'This event was cancelled' : 'Tickets are not on sale') : ended ? 'This event has ended' : '';
+    const lines = [];
+    for (const t of ev.tiers) {
+      const want = Number(entry.qty[t.id]) || 0;
+      if (!want) continue;
+      const open = t.visibility !== 'private' && tierSaleState(t) === 'open' && t.remaining > 0;
+      const cap = open ? tierCap(t) : 0;
+      const q = Math.min(want, cap);
+      const unit = tierKindOf(t) === 'donation' ? Math.max(t.price, round2(Number(entry.amt?.[t.id] ?? t.suggested ?? t.price)) || 0) : tierKindOf(t) === 'free' ? 0 : t.price;
+      lines.push({ t, want, qty: q, cap, unit, note: !open ? (t.remaining <= 0 ? 'Sold out' : tierSaleState(t) === 'closed' ? 'Sales ended' : tierSaleState(t) === 'soon' ? 'Not on sale yet' : 'Not available') : q < want ? `Only ${q} available for you` : '' });
+    }
+    out.push({ id, entry, ev, problem, lines });
+  });
+  return out;
+}
+const cartTotals = (groups) => {
+  let subtotal = 0, fees = 0, count = 0;
+  for (const g of groups) if (!g.problem) for (const l of g.lines) { subtotal += l.unit * l.qty; fees += fee(l.unit) * l.qty; count += l.qty; }
+  return { subtotal: round2(subtotal), fees: round2(fees), total: round2(subtotal + fees), count };
+};
+
+async function pageCart() {
+  loading();
+  const groups = await cartLines();
+  const t = cartTotals(groups);
+  if (!groups.length) {
+    $app.innerHTML = `<div class="empty"><div class="big">🛒</div><h2>Your cart is empty</h2><p class="muted">Pick tickets on any event page and tap <strong>Add to cart</strong>. You can collect tickets for several events and pay once.</p><a class="btn btn-primary" href="#/">Browse events</a></div>`;
+    return;
+  }
+  $app.innerHTML = `
+    <div class="section-head"><div><h1>🛒 Your cart</h1><div class="muted">${t.count} ticket${t.count === 1 ? '' : 's'} for ${groups.filter((g) => !g.problem && g.lines.some((l) => l.qty)).length} event${groups.length === 1 ? '' : 's'} · pay for everything in one checkout</div></div><a class="small" href="#/">← Keep shopping</a></div>
+    <div class="checkout-layout">
+      <div class="cart-list">
+        ${groups.map((g) => `
+        <div class="panel cart-event${g.problem ? ' cart-off' : ''}">
+          <div class="cart-ev-head">
+            ${g.ev ? `<a href="#/event/${esc(g.id)}" class="cart-thumb">${cover(g.ev)}</a>` : '<div class="cart-thumb cart-thumb-empty">🎟️</div>'}
+            <div style="flex:1;min-width:0">
+              <h3 style="margin:0 0 2px">${g.ev ? `<a href="#/event/${esc(g.id)}">${esc(g.ev.title)}</a>` : esc(g.entry.title || 'Event')}</h3>
+              ${g.ev ? `<div class="muted small">📅 ${esc(fmtLong(g.ev.startsAt))}</div><div class="muted small">📍 ${esc([g.ev.venue, g.ev.city].filter(Boolean).join(', '))}</div>` : ''}
+              ${g.problem ? `<div class="notice" style="margin:8px 0 0">${esc(g.problem)}. Remove it to continue.</div>` : ''}
+            </div>
+            <button class="btn btn-ghost btn-sm" data-cart-remove="${esc(g.id)}" title="Remove from cart">✕ Remove</button>
+          </div>
+          ${g.lines.map((l) => `
+          <div class="cart-line">
+            <div><strong>${esc(l.t.name)}</strong> <span class="muted small">${tierKindOf(l.t) === 'donation' ? `💝 ${money(l.unit)} each` : l.unit ? `${money(l.unit)} + ${money(fee(l.unit))} fee` : 'Free'}</span>${l.note ? `<div class="small cart-warn">⚠️ ${esc(l.note)}</div>` : ''}</div>
+            ${l.cap > 0 && !g.problem ? `<select data-cart-ev="${esc(g.id)}" data-cart-tier="${esc(l.t.id)}" aria-label="Quantity">${Array.from({ length: l.cap + 1 }, (_, i) => `<option ${i === l.qty ? 'selected' : ''}>${i}</option>`).join('')}</select>` : '<span class="badge">Unavailable</span>'}
+            <strong class="cart-amt">${l.qty ? (l.unit ? money(l.unit * l.qty) : 'Free') : '—'}</strong>
+          </div>`).join('')}
+        </div>`).join('')}
+      </div>
+      <aside class="panel checkout-summary">
+        <h3 style="margin-top:0">Order summary</h3>
+        <div class="summary">
+          ${groups.filter((g) => !g.problem && g.lines.some((l) => l.qty)).map((g) => `<div><span>${esc(g.ev.title)} <span class="muted small">× ${g.lines.reduce((a, l) => a + l.qty, 0)}</span></span><span>${money(round2(g.lines.reduce((a, l) => a + l.unit * l.qty, 0)))}</span></div>`).join('')}
+          <div><span class="muted">Service fees</span><span>${money(t.fees)}</span></div>
+          <div class="total"><span>Total</span><span>${money(t.total)}</span></div>
+        </div>
+        <button class="btn btn-primary btn-block btn-lg" id="cartGo" style="margin-top:12px" ${t.count && !groups.some((g) => g.problem) ? '' : 'disabled'}>Checkout · ${t.count} ticket${t.count === 1 ? '' : 's'}</button>
+        ${groups.some((g) => g.problem) ? '<p class="muted small" style="text-align:center">Remove the events that are no longer available to continue.</p>' : ''}
+        ${!me ? '<p class="muted small" style="text-align:center;margin:10px 0 0">🔒 You will create a free account (or log in) before paying, so all your tickets are saved in your dashboard.</p>' : ''}
+        <button class="btn btn-ghost btn-block btn-sm" id="cartClear" style="margin-top:10px">Empty cart</button>
+      </aside>
+    </div>`;
+  $app.querySelectorAll('[data-cart-remove]').forEach((b) => (b.onclick = () => { const c = cartLoad(); delete c[b.dataset.cartRemove]; cartSave(c); pageCart(); }));
+  $app.querySelectorAll('select[data-cart-ev]').forEach((s) => (s.onchange = () => {
+    const c = cartLoad(); const e = c[s.dataset.cartEv]; if (!e) return;
+    const v = Number(s.value);
+    if (v) e.qty[s.dataset.cartTier] = v; else delete e.qty[s.dataset.cartTier];
+    if (!Object.keys(e.qty).length) delete c[s.dataset.cartEv];
+    cartSave(c); pageCart();
+  }));
+  document.getElementById('cartClear').onclick = () => { if (confirm('Remove everything from your cart?')) { cartSave({}); pageCart(); } };
+  document.getElementById('cartGo').onclick = () => {
+    // keep the trimmed quantities, then continue
+    const c = cartLoad();
+    for (const g of groups) if (c[g.id]) { for (const l of g.lines) { if (l.qty) c[g.id].qty[l.t.id] = l.qty; else delete c[g.id].qty[l.t.id]; } if (!Object.keys(c[g.id].qty).length) delete c[g.id]; }
+    cartSave(c);
+    go(me ? '#/cart/checkout' : '#/register?role=user&from=checkout&next=' + encodeURIComponent('#/cart/checkout'));
+  };
+}
+
+const orderPdfHref = (id) => (typeof TJ !== 'undefined' && TJ.rest ? `${TJ.rest}orders/${encodeURIComponent(id)}/tickets.pdf?_wpnonce=${TJ.nonce}` : `/api/orders/${encodeURIComponent(id)}/tickets.pdf`);
+async function pageCartCheckout() {
+  if (!me) { go('#/register?role=user&from=checkout&next=' + encodeURIComponent('#/cart/checkout')); return; }
+  loading();
+  const groups = (await cartLines()).filter((g) => !g.problem && g.lines.some((l) => l.qty));
+  const t = cartTotals(groups);
+  if (!t.count) { go('#/cart'); return; }
+  const np = String(me.name || '').trim().split(/\s+/);
+  const nameParts = { first: np.length > 1 ? np.slice(0, -1).join(' ') : (np[0] || ''), last: np.length > 1 ? np[np.length - 1] : '' };
+  const slotsOf = (g) => g.lines.flatMap((l) => Array(l.qty).fill(l.t));
+  $app.innerHTML = `
+    <div class="checkout-steps"><span class="done">1 · Cart</span><span class="done">2 · Account ✓</span><span class="on">3 · Checkout</span><span>4 · Your tickets</span></div>
+    <div class="section-head"><div><a href="#/cart" class="small">← Back to cart</a><h1>Checkout</h1><div class="muted">Signed in as <strong>${esc(me.name)}</strong> (${esc(me.email)}) · your tickets will be saved to <a href="#/tickets">My Dashboard</a></div></div></div>
+    <div class="checkout-layout">
+      <div class="panel">
+        ${errBox('coErr')}
+        <form id="ccForm">
+          <h3>🎟️ Your details</h3>
+          <div class="row">
+            <div class="field"><label>First name <span class="req">*</span></label><input name="buyerFirstName" autocomplete="given-name" required maxlength="40" value="${esc(nameParts.first)}" /></div>
+            <div class="field"><label>Last name <span class="req">*</span></label><input name="buyerLastName" autocomplete="family-name" required maxlength="40" value="${esc(nameParts.last)}" /></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Email for tickets & QR codes</label><input name="buyerEmail" type="email" autocomplete="email" required value="${esc(me.email)}" /></div>
+            <div class="field"><label>Mobile number <span class="muted small">(we'll text your tickets)</span></label><input name="buyerPhone" type="tel" autocomplete="tel" required placeholder="242-555-1234" value="${esc(me.phone || '')}" /></div>
+          </div>
+          ${groups.some((g) => slotsOf(g).length > 1) ? `
+          <h3 style="margin-top:10px">👥 Who's coming? <span class="muted small" style="font-weight:500">(optional)</span></h3>
+          <p class="muted small" style="margin-top:-4px">The first ticket for each event is yours. Add a name and email for your guests and we'll email each person their own ticket with a PDF. Leave a ticket blank to keep it in your email.</p>
+          ${groups.map((g) => slotsOf(g).length > 1 ? `<div class="att-event"><div class="att-ev-title">${esc(g.ev.title)}</div><div class="att-list">${slotsOf(g).map((tt, i) => i === 0 ? '' : `
+            <div class="att-row">
+              <div class="att-label">Ticket ${i + 1} · ${esc(tt.name)}</div>
+              <div class="row">
+                <div class="field"><label>Guest name</label><input data-cart-att-name="${esc(g.id)}:${i}" maxlength="80" autocomplete="off" placeholder="Full name" /></div>
+                <div class="field"><label>Guest email</label><input data-cart-att-email="${esc(g.id)}:${i}" type="email" maxlength="160" autocomplete="off" placeholder="name@example.com" /></div>
+              </div>
+            </div>`).join('')}</div></div>` : '').join('')}` : ''}
+          ${t.total > 0 ? `
+          <h3 style="margin-top:10px">💳 Payment</h3>
+          <div class="notice">Demo mode — no real charge. Use any test card, e.g. 4242 4242 4242 4242.</div>
+          <div class="field"><label>Name on card</label><input name="cardHolder" autocomplete="cc-name" required value="${esc(me.name)}" /></div>
+          <div class="field"><label>Card number</label><input name="cardNumber" inputmode="numeric" autocomplete="cc-number" placeholder="1234 5678 9012 3456" required /></div>
+          <div class="row"><div class="field"><label>Expiry</label><input name="expiry" placeholder="MM/YY" autocomplete="cc-exp" required /></div>
+          <div class="field"><label>CVC</label><input name="cvc" inputmode="numeric" placeholder="123" autocomplete="cc-csc" required /></div></div>` : ''}
+          ${META.captcha?.checkout ? '<div class="captcha-box" id="ccCaptcha"></div>' : ''}
+          <button class="btn btn-primary btn-block btn-lg" id="ccPay">${t.total > 0 ? `🔒 Pay ${money(t.total)}` : 'Get my free tickets'}</button>
+          <p class="muted small" style="text-align:center;margin:10px 0 0">One payment for everything. You'll get each event's QR tickets by email and text, and they'll always be in your dashboard.</p>
+        </form>
+      </div>
+      <aside class="panel checkout-summary">
+        <h3 style="margin-top:0">🛒 ${t.count} ticket${t.count === 1 ? '' : 's'} · ${groups.length} event${groups.length === 1 ? '' : 's'}</h3>
+        <div class="summary">
+          ${groups.map((g) => `<div class="cart-sum-ev"><strong>${esc(g.ev.title)}</strong><span class="muted small">${esc(fmtLong(g.ev.startsAt))}</span></div>${g.lines.filter((l) => l.qty).map((l) => `<div><span>${l.qty} × ${esc(l.t.name)}</span><span>${l.unit ? money(l.unit * l.qty) : 'Free'}</span></div>`).join('')}`).join('')}
+          <div><span class="muted">Service fees</span><span>${money(t.fees)}</span></div>
+          <div class="total"><span>Total</span><span>${money(t.total)}</span></div>
+        </div>
+        <a class="btn btn-ghost btn-block btn-sm" style="margin-top:12px" href="#/cart">✏️ Change cart</a>
+      </aside>
+    </div>`;
+  const cap = META.captcha?.checkout ? Captcha.mount(document.getElementById('ccCaptcha')) : null;
+  document.getElementById('ccForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    f.buyerFirstName = (f.buyerFirstName || '').trim(); f.buyerLastName = (f.buyerLastName || '').trim();
+    if (!f.buyerFirstName || !f.buyerLastName) { showErr('coErr', 'Please enter your first and last name.'); return; }
+    const carts = groups.map((g) => ({
+      eventId: g.id,
+      items: g.lines.filter((l) => l.qty).map((l) => ({ tierId: l.t.id, qty: l.qty, ...(tierKindOf(l.t) === 'donation' ? { amount: l.unit } : {}) })),
+      attendees: slotsOf(g).map((_, i) => {
+        if (!i) return {};
+        const v = (k) => ((document.querySelector(`[data-cart-att-${k}="${g.id}:${i}"]`) || {}).value || '').trim();
+        return { name: v('name'), email: v('email') };
+      }),
+    }));
+    for (const [gi, c] of carts.entries()) { const m = c.attendees.findIndex((a) => a.email && !a.name); if (m > 0) { showErr('coErr', `${groups[gi].ev.title}: please enter a name for ticket ${m + 1}, or clear its email.`); return; } }
+    const captcha = cap ? cap.token() : '';
+    if (cap && !captcha) { showErr('coErr', 'Please tick "I\'m not a robot" to complete your purchase.'); return; }
+    const btn = document.getElementById('ccPay'); btn.disabled = true; btn.textContent = 'Processing…';
+    try {
+      const r = await api('/api/cart/checkout', { method: 'POST', body: {
+        carts, buyerFirstName: f.buyerFirstName, buyerLastName: f.buyerLastName, buyerEmail: f.buyerEmail, buyerPhone: f.buyerPhone,
+        payment: { cardHolder: f.cardHolder, cardNumber: f.cardNumber, expiry: f.expiry, cvc: f.cvc }, captcha,
+      } });
+      cartSave({});
+      sessionStorage.removeItem('tj_cart');
+      const n = r.orders.reduce((a, o) => a + o.tickets.length, 0);
+      toast(`You're going! 🎉 ${n} ticket${n === 1 ? '' : 's'} saved to your dashboard`);
+      window.scrollTo(0, 0);
+      $app.innerHTML = `
+        <div class="checkout-steps"><span class="done">1 · Cart</span><span class="done">2 · Account ✓</span><span class="done">3 · Checkout</span><span class="on">4 · Your tickets</span></div>
+        <div class="form-page"><div class="form-card" style="max-width:720px">
+          <h1 class="display" style="font-size:2.2rem">🎉 You're going!</h1>
+          <p>${n} ticket${n === 1 ? '' : 's'} for ${r.orders.length} event${r.orders.length === 1 ? '' : 's'}. We've emailed your QR tickets${r.orders.some((o) => o.tickets.some((x) => x.holderEmail)) ? ' and sent each guest their own ticket' : ''}. Total paid: <strong>${money(round2(r.orders.reduce((a, o) => a + o.total, 0)))}</strong>.</p>
+          <div class="cart-done">${r.orders.map((o) => `
+            <div class="cart-done-row">
+              <div><strong>${esc(o.event ? o.event.title : 'Event')}</strong><div class="muted small">${o.tickets.length} ticket${o.tickets.length === 1 ? '' : 's'} · Order ${esc(o.id.slice(-8).toUpperCase())}${o.event ? ' · ' + esc(fmtLong(o.event.startsAt)) : ''}</div></div>
+              <div class="actions"><a class="btn btn-blue btn-sm" href="#/order/${esc(o.id)}">View tickets</a><a class="btn btn-ghost btn-sm" href="${orderPdfHref(o.id)}" download>⬇ PDF</a></div>
+            </div>`).join('')}</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px"><a class="btn btn-primary" href="#/tickets">Go to My Dashboard</a><a class="btn btn-ghost" href="#/">Find more events</a></div>
+        </div></div>`;
+    } catch (err) { showErr('coErr', err.message); btn.disabled = false; btn.textContent = 'Try again'; if (cap) cap.reset(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  };
 }
 
 // ---------- checkout page (account required) ----------
