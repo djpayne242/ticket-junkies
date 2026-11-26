@@ -444,7 +444,35 @@ async function route() {
   const rp = parseHash().parts.join('/');
   if (lastRoutePath !== null && rp !== lastRoutePath) showPreloader();
   lastRoutePath = rp;
-  try { await routePage(); } finally { hidePreloader(); }
+  tjKeepFooterDown(true);
+  try { await routePage(); } finally { hidePreloader(); tjKeepFooterDown(); }
+}
+// Keeps the footer at the bottom of the screen at all times. While a page is loading, the content area
+// fills the whole screen so the footer stays out of sight (it never pops up in the middle); once loaded,
+// short pages still stretch so the footer sits on the bottom edge instead of floating mid-screen.
+function tjKeepFooterDown(loading) {
+  const all = document.querySelectorAll('#app, .tj-root.tj-widget');
+  const el = all[all.length - 1];
+  if (!el || !el.isConnected) return;
+  const busy = loading === true || !!el.querySelector('.loading');
+  const old = el.style.minHeight;
+  el.style.minHeight = '';
+  const r = el.getBoundingClientRect();
+  const top = r.top + window.scrollY;
+  // Everything after this area (footer etc.), measured from the real end of the page content
+  const b = document.body;
+  const below = b.getBoundingClientRect().bottom + (parseFloat(getComputedStyle(b).marginBottom) || 0) - r.bottom;
+  const room = window.innerHeight - top - (busy ? 0 : below);
+  const need = busy ? Math.ceil(room) : Math.floor(room);
+  el.style.minHeight = need > r.height ? need + 'px' : '';
+  if (busy && el.style.minHeight === '' && old) el.style.minHeight = old;
+}
+{
+  let tjFootQueued = false;
+  const queue = () => { if (tjFootQueued) return; tjFootQueued = true; requestAnimationFrame(() => { tjFootQueued = false; tjKeepFooterDown(); }); };
+  new MutationObserver(queue).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('resize', queue);
+  window.addEventListener('load', queue);
 }
 async function routePage() {
   $nav.classList.remove('open');

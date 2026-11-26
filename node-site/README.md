@@ -24,6 +24,8 @@ Data is stored in `data/db.json` (delete it to reset to the demo data). Uploaded
 The owner account controls the Admin Panel and can also post events ("My Events" / "+ Create Event"). If the database ever has no admin, the server creates a fallback admin@ticketjunkies.com / admin12345 at startup; change its password immediately if that happens. Change or remove the demo accounts before launch. They're created in `seed()` in `server.mjs`.
 
 
+**Footer stays at the bottom (v1.2.11):** while a page loads (a reload or a click to another page), the page area fills the whole screen, so the footer never pops up in the middle and then jumps down. On short pages (like Log in) the footer sits on the bottom edge of the screen. It works for both versions; on WordPress a tiny script placed just before the footer sets this up before the footer is drawn.
+
 **Speed & security (v1.2.10):**
 - **Security headers** on every page and API answer: no framing by other sites (clickjacking), no MIME sniffing, a strict referrer, and unused browser features (microphone, payments, USB) switched off. Camera (QR check-in) and location still work. On https, browsers are told to always use https (HSTS), and the log-in cookie is marked Secure.
 - **Speed limits against bots:** each visitor may try 20 log-ins per 10 minutes, 10 sign-ups per hour, 5 password-reset emails per 15 minutes, 20 checkouts per 10 minutes and 60 uploads per hour. After that they see "Too many attempts. Please wait N minute(s)". Other visitors aren't affected. (On WordPress, the log-in, sign-up, checkout and upload limits apply; password resets go through WordPress's own reset page.)

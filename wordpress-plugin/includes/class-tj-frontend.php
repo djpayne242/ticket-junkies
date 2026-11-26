@@ -70,6 +70,7 @@ final class TJ_Frontend {
     if ($ui['header'] || $ui['footer']) add_filter('hello_elementor_header_footer', '__return_false');
     if ($ui['header']) add_action('wp_body_open', [__CLASS__, 'header'], 5);
     if ($ui['footer']) add_action('wp_footer', [__CLASS__, 'footer'], 0);
+    add_action('wp_footer', [__CLASS__, 'footer_guard'], -1);
   }
 
   /**
@@ -222,6 +223,12 @@ final class TJ_Frontend {
       . '</div>';
     echo '<button type="button" class="menu-btn" id="menuBtn" aria-label="Menu">☰</button><nav id="nav" class="nav"></nav>';
     echo '</div></header></div>';
+  }
+
+  /** Runs before the footer is drawn: a TicketJunkies area that is still loading fills the screen, so the footer never shows up mid-page. */
+  public static function footer_guard() {
+    if (self::is_editor()) return;
+    echo '<script>(function(){var w=document.querySelectorAll(".tj-root.tj-widget"),e=w[w.length-1];if(e&&e.querySelector(".loading")){var t=e.getBoundingClientRect().top;e.style.minHeight=Math.max(0,Math.ceil(innerHeight-t))+"px";}})();</script>' . "\n";
   }
 
   public static function footer() {
